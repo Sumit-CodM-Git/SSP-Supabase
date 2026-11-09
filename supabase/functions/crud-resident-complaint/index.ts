@@ -390,7 +390,7 @@ async function getContext(
             block,
             tower,
             deleted_at,
-            contact:SSP_Contact!contact ( name, phone, email )
+            contact:SSP_Contact!contact (parking_slot, name, phone, email )
         `)
         .eq("user_id", userId)
         .maybeSingle();
@@ -774,7 +774,7 @@ async function fetchAgentNames(
 
     const { data } = await supabaseAdmin
         .from("SSP_Society_User")
-        .select("user_id, contact:SSP_Contact!contact ( name )")
+        .select("user_id, contact:SSP_Contact!contact (parking_slot, name )")
         .in("user_id", agentIds);
 
     for (

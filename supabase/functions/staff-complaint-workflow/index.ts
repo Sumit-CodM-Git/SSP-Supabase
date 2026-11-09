@@ -1,3 +1,4 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
 // deno-lint-ignore-file no-import-prefix no-explicit-any
 // ============================================
 // staff-complaint-workflow
@@ -24,6 +25,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 // ============================================
 
 type ActionType =
+    | "FETCH_OTP"
     | "UPLOAD_IMAGE"
     | "FETCH_IMAGE"
     | "DELETE_IMAGE"
@@ -51,9 +53,11 @@ interface StaffComplaintWorkflowRequest {
     isUploaded?: boolean | string;
     documentId?: string;
     otp?: string;
+    stage?: "START" | "END";
 }
 
 interface StaffContext {
+  parkingSlot?: string | null;
     authUserId: string;
     staffId: string;
     staffType: StaffType;
@@ -95,6 +99,7 @@ const OTP_TTL_MS = 10 * 60 * 1000;
 const OTP_TTL_MINUTES = 10;
 
 const VALID_ACTIONS: ActionType[] = [
+    "FETCH_OTP",
     "UPLOAD_IMAGE",
     "FETCH_IMAGE",
     "DELETE_IMAGE",
@@ -147,19 +152,11 @@ function getISTISOString(): string {
     }:${map.get("minute")}:${map.get("second")}+05:30`;
 }
 
-/**
- * Generate a 6-digit date-based OTP (DDMMYY in IST).
- * Example: 2026-09-29 → "290926"
- */
-function generateDateOtp(): string {
-    const now = new Date();
-    const ist = new Date(
-        now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
-    );
-    const dd = String(ist.getDate()).padStart(2, "0");
-    const mm = String(ist.getMonth() + 1).padStart(2, "0");
-    const yy = String(ist.getFullYear()).slice(-2);
-    return `${dd}${mm}${yy}`;
+/** Temporary OTP convention: current date as DDMMYY in India time. */
+function generateOtp(): string {
+    const parts = IST_ISO_FORMATTER.formatToParts(new Date());
+    const date = new Map(parts.map((part) => [part.type, part.value]));
+    return `${date.get("day")}${date.get("month")}${date.get("year")!.slice(-2)}`;
 }
 
 function extractStorageKey(fullUrl: string | null): string | null {
@@ -227,7 +224,7 @@ function buildError(
 // AUTH — resolve staff context
 // ============================================
 
-async function getStaffContext(
+async function getDirectStaffContext(
     authUserId: string,
 ): Promise<ContextSuccess | ContextFailure> {
     // ─── Try as service_agent ───
@@ -235,7 +232,7 @@ async function getStaffContext(
         .from("SSP_Society_User")
         .select(`
             user_id, society, role, deleted_at,
-            contact:SSP_Contact!contact ( name, phone ),
+            contact:SSP_Contact!contact (parking_slot, name, phone ),
             society_data:SSP_Society!society ( registration_number )
         `)
         .eq("user_id", authUserId)
@@ -274,6 +271,7 @@ async function getStaffContext(
             return {
                 ok: true,
                 ctx: {
+                    parkingSlot: contactParkingSlot(contact),
                     authUserId,
                     staffId: String(agentRow.user_id),
                     staffType: "SERVICE_AGENT",
@@ -331,6 +329,73 @@ async function getStaffContext(
         code: "FORBIDDEN",
         message: "Only Service Agents or Vendors can access this API.",
         status: 403,
+    };
+}
+
+// Resolve a vendor profile only through the complaint assignment and the
+// authenticated caller's stored profile. Never trust a caller-supplied staffId.
+async function getStaffContext(
+    authUserId: string,
+    complaintId?: string,
+): Promise<ContextSuccess | ContextFailure> {
+    const direct = await getDirectStaffContext(authUserId);
+    if (!complaintId || (!direct.ok && direct.status !== 403)) return direct;
+
+    const { data: complaint, error: complaintErr } = await supabaseAdmin
+        .from("SSP_Complaint")
+        .select("assigned_agent, non_society_user")
+        .eq("complaint_id", complaintId)
+        .is("deleted_at", null)
+        .maybeSingle();
+    if (complaintErr) {
+        return { ok: false, code: "SERVER_ERROR", message: complaintErr.message, status: 500 };
+    }
+    if (!complaint) return direct;
+    // Keep the original identity when it is already assigned.
+    if (direct.ok && (
+        (direct.ctx.staffType === "SERVICE_AGENT" && complaint.assigned_agent === direct.ctx.staffId) ||
+        (direct.ctx.staffType === "VENDOR" && complaint.non_society_user === direct.ctx.staffId)
+    )) return direct;
+    if (!complaint.non_society_user) return direct;
+
+    const { data: caller, error: callerErr } = await supabaseAdmin
+        .from("SSP_Society_User")
+        .select("society, deleted_at, contact:SSP_Contact!contact(parking_slot, phone)")
+        .eq("user_id", authUserId)
+        .maybeSingle();
+    if (callerErr) {
+        return { ok: false, code: "SERVER_ERROR", message: callerErr.message, status: 500 };
+    }
+    const contact = Array.isArray(caller?.contact) ? caller.contact[0] : caller?.contact;
+    const phone = direct.ok ? direct.ctx.phone : contact?.phone;
+    const societyId = direct.ok ? direct.ctx.societyId : caller?.society;
+    const digits = String(phone ?? "").replace(/\D/g, "");
+    if ((!direct.ok && caller?.deleted_at) || digits.length < 10 || !societyId) return direct;
+
+    const { data: vendor, error: vendorErr } = await supabaseAdmin
+        .from("SSP_Non_Society_User")
+        .select("non_society_user_id, society, role, name, phone_number, deleted_at, society_data:SSP_Society!society(registration_number)")
+        .eq("non_society_user_id", complaint.non_society_user)
+        .eq("society", societyId)
+        .maybeSingle();
+    if (vendorErr) {
+        return { ok: false, code: "SERVER_ERROR", message: vendorErr.message, status: 500 };
+    }
+    const vendorPhone = String(vendor?.phone_number ?? "").replace(/\D/g, "");
+    if (!vendor || vendor.deleted_at || String(vendor.role).toLowerCase() !== "vendor" ||
+        vendorPhone.length < 10 || vendorPhone.slice(-10) !== digits.slice(-10)) return direct;
+    const society = Array.isArray(vendor.society_data) ? vendor.society_data[0] : vendor.society_data;
+    return {
+        ok: true,
+        ctx: {
+            authUserId,
+            staffId: vendor.non_society_user_id,
+            staffType: "VENDOR",
+            societyId: vendor.society,
+            societyRegistrationNumber: society?.registration_number ?? "",
+            name: vendor.name ?? "",
+            phone: vendor.phone_number ?? "",
+        },
     };
 }
 
@@ -564,7 +629,8 @@ async function handleUploadImage(
             s3_path: urlInfo.publicUrl,
             society: ctx.societyId,
             complaint: complaintId,
-            uploaded_by: ctx.staffId,
+            // uploaded_by references SSP_Society_User, not vendor records.
+            uploaded_by: ctx.staffType === "VENDOR" ? null : ctx.staffId,
             uploaded_on: getCurrentTimestamp(),
             created_at: getCurrentTimestamp(),
         };
@@ -809,39 +875,22 @@ async function handleStartOtp(
         );
     }
 
-    if (c.start_otp_verified_at) {
-        return buildError(
-            req,
-            "BAD_REQUEST",
-            "START OTP has already been verified.",
-            400,
-        );
-    }
-
-    if (
-        c.start_otp && c.start_otp_generated_at &&
-        !isOtpExpired(c.start_otp_generated_at)
-    ) {
-        return buildError(
-            req,
-            "CONFLICT",
-            "START OTP already generated. Wait for it to expire (10 minutes) or use the existing OTP.",
-            409,
-        );
-    }
-
-    const otp = generateDateOtp();
+    const otp = generateOtp();
     const now = new Date().toISOString();
 
-    const { error: upErr } = await supabaseAdmin
+    const { data: savedOtp, error: upErr } = await supabaseAdmin
         .from("SSP_Complaint")
         .update({
             start_otp: otp,
             start_otp_generated_at: now,
+            start_otp_verified_at: null,
         })
-        .eq("complaint_id", complaintId);
+        .eq("complaint_id", complaintId)
+        .is("deleted_at", null)
+        .select("complaint_id")
+        .maybeSingle();
 
-    if (upErr) {
+    if (upErr || !savedOtp) {
         return buildError(req, "SERVER_ERROR", "Failed to store OTP.", 500);
     }
 
@@ -849,7 +898,7 @@ async function handleStartOtp(
         complaintId,
         stage: "START",
         message:
-            `START OTP has been generated and sent to the resident. It is valid for ${OTP_TTL_MINUTES} minutes. Ask the resident to share it with you, then verify it.`,
+            `START OTP has been generated. The resident can retrieve it using FETCH_OTP. It is valid for ${OTP_TTL_MINUTES} minutes. Ask the resident to share it with you, then verify it.`,
         otpVerified: false,
         nextStep: "VERIFY_START",
     });
@@ -965,7 +1014,7 @@ async function handleVerifyStart(
         message: "Work started successfully.",
         otpVerified: true,
         status: "in_progress",
-        nextStep: "REQUEST_END_OTP",
+        nextStep: "END_OTP",
     });
 }
 
@@ -1010,7 +1059,7 @@ async function handleEndOtp(
         );
     }
     if (
-        c.end_otp && c.end_otp_generated_at &&
+        c.end_otp === generateOtp() && c.end_otp_generated_at &&
         !isOtpExpired(c.end_otp_generated_at)
     ) {
         return buildError(
@@ -1021,18 +1070,21 @@ async function handleEndOtp(
         );
     }
 
-    const otp = generateDateOtp();
+    const otp = generateOtp();
     const now = new Date().toISOString();
 
-    const { error: upErr } = await supabaseAdmin
+    const { data: savedOtp, error: upErr } = await supabaseAdmin
         .from("SSP_Complaint")
         .update({
             end_otp: otp,
             end_otp_generated_at: now,
         })
-        .eq("complaint_id", complaintId);
+        .eq("complaint_id", complaintId)
+        .is("deleted_at", null)
+        .select("complaint_id")
+        .maybeSingle();
 
-    if (upErr) {
+    if (upErr || !savedOtp) {
         return buildError(req, "SERVER_ERROR", "Failed to store OTP.", 500);
     }
 
@@ -1040,7 +1092,7 @@ async function handleEndOtp(
         complaintId,
         stage: "END",
         message:
-            `END OTP has been generated and sent to the resident. It is valid for ${OTP_TTL_MINUTES} minutes. Ask the resident to share it with you, then verify it.`,
+            `END OTP has been generated. The resident can retrieve it using FETCH_OTP. It is valid for ${OTP_TTL_MINUTES} minutes. Ask the resident to share it with you, then verify it.`,
         otpVerified: false,
         nextStep: "VERIFY_END",
     });
@@ -1156,6 +1208,39 @@ async function handleVerifyEnd(
     });
 }
 
+// Only the resident who raised the complaint may retrieve its OTP.
+async function handleFetchOtp(
+    req: Request,
+    residentId: string,
+    body: StaffComplaintWorkflowRequest,
+): Promise<Response> {
+    const complaintId = cleanText(body.complaintId, 50);
+    const stage = String(body.stage ?? "").toUpperCase();
+    if (!complaintId || !["START", "END"].includes(stage)) {
+        return buildError(req, "BAD_REQUEST", "complaintId and stage (START or END) are required.", 400);
+    }
+    const { data: complaint, error } = await supabaseAdmin
+        .from("SSP_Complaint")
+        .select("complaint_id, status, start_otp, start_otp_generated_at, start_otp_verified_at, end_otp, end_otp_generated_at, end_otp_verified_at")
+        .eq("complaint_id", complaintId)
+        .eq("society_user", residentId)
+        .is("deleted_at", null)
+        .maybeSingle();
+    if (error) return buildError(req, "SERVER_ERROR", "Failed to fetch OTP.", 500);
+    if (!complaint) return buildError(req, "NOT_FOUND", "Complaint not found for this resident.", 404);
+    const prefix = stage === "START" ? "start" : "end";
+    if (["resolved", "cancelled", "rejected", "completed"].includes(String(complaint.status).toLowerCase()) || complaint[`${prefix}_otp_verified_at`]) {
+        return buildError(req, "BAD_REQUEST", "OTP is no longer available.", 400);
+    }
+    if (!complaint[`${prefix}_otp`]) return buildError(req, "NOT_FOUND", "OTP has not been generated yet.", 404);
+    const generatedAt = complaint[`${prefix}_otp_generated_at`];
+    if (isOtpExpired(generatedAt)) return buildError(req, "BAD_REQUEST", "OTP has expired. Ask staff to request a new one.", 400);
+    return buildSuccess(req, {
+        complaintId, stage, otp: String(complaint[`${prefix}_otp`]),
+        expiresAt: new Date(new Date(generatedAt).getTime() + OTP_TTL_MS).toISOString(),
+    });
+}
+
 // ============================================
 // MAIN HANDLER
 // ============================================
@@ -1185,8 +1270,8 @@ Deno.serve(
                 );
             }
 
-            const rawAction = String(body.action ?? "")
-                .toUpperCase() as ActionType;
+            const requestedAction = String(body.action ?? "").trim().toUpperCase();
+            const rawAction = (requestedAction === "REQUEST_END_OTP" ? "END_OTP" : requestedAction) as ActionType;
             if (!VALID_ACTIONS.includes(rawAction)) {
                 return buildError(
                     req,
@@ -1197,8 +1282,12 @@ Deno.serve(
             }
             action = rawAction;
 
+            if (action === "FETCH_OTP") {
+                return await handleFetchOtp(req, authCtx.user.id, body);
+            }
+
             // Resolve staff context
-            const ctxResult = await getStaffContext(authCtx.user.id);
+            const ctxResult = await getStaffContext(authCtx.user.id, cleanText(body.complaintId, 50));
             if (!ctxResult.ok) {
                 return buildError(
                     req,

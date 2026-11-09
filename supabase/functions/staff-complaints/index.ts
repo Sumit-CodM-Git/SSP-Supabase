@@ -1,3 +1,4 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
 // // ============================================
 // // staff-complaints - Unified API for Staff (Optimized)
 // // ============================================
@@ -954,6 +955,7 @@ interface StaffComplaintsRequest {
 }
 
 interface StaffValidationResult {
+  parkingSlot?: string | null;
   staffId: string;
   staffType: StaffType;
   name: string;
@@ -1350,7 +1352,7 @@ async function validateStaff(
           user_id,
           role,
           service_agent_rating,
-          contact:contact (name, phone)
+          contact:contact (parking_slot, name, phone)
         `)
         .eq("user_id", staffId)
         .eq("society", societyId)
@@ -1371,6 +1373,7 @@ async function validateStaff(
       const contact = firstOrNull(agent.contact);
       return {
         data: {
+          parkingSlot: contactParkingSlot(contact),
           staffId: agent.user_id,
           staffType: "SERVICE_AGENT",
           name: contact?.name || "Unknown",
@@ -1665,7 +1668,7 @@ Deno.serve(
             unit_flat_number,
             block:SSP_Block!left (block_name),
             tower:SSP_Tower!left (name),
-            contact:contact (name, phone)
+            contact:contact (parking_slot, name, phone)
           )
         `);
 
@@ -1816,6 +1819,7 @@ Deno.serve(
             assignedDateTime: formatToIST(comp.assigned_date_time),
             completionDateTime: formatToIST(comp.completion_date_time),
             residentDetails: {
+              parkingSlot: contactParkingSlot(contact),
               name: contact?.name || "Unknown",
               phone: contact?.phone || "",
               unitFlatNumber: residentData?.unit_flat_number || null,

@@ -202,7 +202,7 @@ Deno.serve(
           user_id,
           role,
           society:SSP_Society (registration_number),
-          contact:SSP_Contact (phone)
+          contact:SSP_Contact (parking_slot, phone)
         `);
 
       if (sError) {

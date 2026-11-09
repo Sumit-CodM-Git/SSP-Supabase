@@ -1,3 +1,4 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
 /*import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -278,7 +279,7 @@ Deno.serve(async (req: Request) => {
         society_user:SSP_Society_User!inner(
           unit_flat_number,
           society,
-          contact:SSP_Contact(
+          contact:SSP_Contact(parking_slot,
             name
           )
         )
@@ -315,7 +316,7 @@ if (searchText && searchText.trim() !== "") {
     .select(`
       user_id,
       unit_flat_number,
-      contact:SSP_Contact(
+      contact:SSP_Contact(parking_slot,
         name
       )
     `)
@@ -416,6 +417,7 @@ if (searchText && searchText.trim() !== "") {
       }
 
       return {
+        parkingSlot: contactParkingSlot(contactContext),
         paymentName: p.payment_id ?? "N/A",
         amount: p.amount != null ? String(p.amount) : "0",
         dueDate: p.due_date ? String(p.due_date) : null,

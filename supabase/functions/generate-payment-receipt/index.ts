@@ -1,3 +1,4 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
 // import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // import { PDFDocument, StandardFonts, rgb } from "https://esm.sh/pdf-lib@1.17.1";
@@ -1339,6 +1340,7 @@ interface FacilityRow {
 }
 
 interface ReceiptData {
+  parkingSlot?: string | null;
     receiptNo: string;
     generatedAt: string;
 
@@ -1762,7 +1764,7 @@ async function resolvePaymentForCaller(
     // Ownership check via owner's contact phone
     const { data: owner, error: ownerErr } = await adminClient
         .from("SSP_Society_User")
-        .select(`user_id, contact:SSP_Contact!inner( phone )`)
+        .select(`user_id, contact:SSP_Contact!inner(parking_slot, phone )`)
         .eq("user_id", p.society_user)
         .maybeSingle();
 
@@ -1917,7 +1919,7 @@ async function buildReceiptDataFromPayment(payment: PaymentRow): Promise<{ ok: t
         .select(`
             user_id,
             unit_flat_number,
-            contact:SSP_Contact!inner (
+            contact:SSP_Contact!inner (parking_slot,
                 contact_id, name, email, phone
             ),
             block:SSP_Block!left ( block_name ),
@@ -1977,6 +1979,7 @@ async function buildReceiptDataFromPayment(payment: PaymentRow): Promise<{ ok: t
         : `PAY-${payment.pay_rec_id.slice(0, 8).toUpperCase()}`;
 
     const data: ReceiptData = {
+        parkingSlot: contactParkingSlot(r.contact),
         receiptNo,
         generatedAt: new Date().toISOString(),
 
@@ -2268,7 +2271,7 @@ async function listReceipts(
     // Find all SSP_Society_User ids whose contact phone matches caller
     const { data: myUsers, error: uErr } = await adminClient
         .from("SSP_Society_User")
-        .select(`user_id, contact:SSP_Contact!inner( phone )`);
+        .select(`user_id, contact:SSP_Contact!inner(parking_slot, phone )`);
 
     if (uErr) {
         console.error("List: user lookup failed", uErr);

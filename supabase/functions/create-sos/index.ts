@@ -161,7 +161,7 @@ Deno.serve(
             if (user.contact) {
                 const { data: contactRow } = await supabase
                     .from("SSP_Contact")
-                    .select("name, phone, emergency_phone")
+                    .select("parking_slot, name, phone, emergency_phone")
                     .eq("contact_id", user.contact)
                     .maybeSingle();
 

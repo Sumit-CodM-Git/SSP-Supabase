@@ -1,3 +1,4 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
 // deno-lint-ignore-file no-import-prefix no-explicit-any
 // ============================================
 // resident-visitor — Resident-side read APIs
@@ -671,7 +672,7 @@ async function handleView(
         .select(`
             user_id,
             unit_flat_number,
-            contact:contact ( name, phone, email )
+            contact:contact (parking_slot, name, phone, email )
         `)
         .eq("user_id", callerUserId)
         .eq("society", societyId)
@@ -815,6 +816,7 @@ async function handleView(
         totalPages: Math.ceil(total / limitNum),
         visitors: items,
         residentDetails: {
+            parkingSlot: contactParkingSlot(contactData),
             residentId: residentData.user_id,
             name: contactData?.name || "Unknown",
             phone: contactData?.phone || "",

@@ -1,3 +1,4 @@
+import { loadResidentFacilityBookings } from "../_shared/resident-facility-bookings.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { requireAuth, AuthContext } from "../_shared/auth.ts";
 import {
@@ -580,34 +581,16 @@ Deno.serve(
         );
         const offset = (pageNum - 1) * limitNum;
 
-        let listQ = supabaseAdmin
-          .from("SSP_Facility_Booking_Request")
-          .select(
-            `
-            request_id, status, booking_start_date, booking_end_date, is_all_day,
-            purpose_of_visit, created_at,
-            facility:facility ( id, name, booking_mode, base_price ),
-            payment:payment ( pay_rec_id, payment_id, amount, payment_status, payment_method )
-          `,
-            { count: "exact" },
-          )
-          .eq("requested_by", societyUserId);
+        const allBookings = await loadResidentFacilityBookings(supabaseAdmin, societyUserId);
+        const cleanStatus = statusFilter ? String(statusFilter).trim().toLowerCase() : 'all';
+        const matching = cleanStatus === 'all' ? allBookings
+          : allBookings.filter(row => String(row.status ?? '').toLowerCase() === cleanStatus);
+        const count = matching.length;
+        const bookings = matching.slice(offset, offset + limitNum);
 
-        if (statusFilter) {
-          listQ = listQ.eq("status", String(statusFilter).trim().toLowerCase());
-        }
-
-        const { data: bookings, count, error: listErr } = await listQ
-          .order("created_at", { ascending: false })
-          .range(offset, offset + limitNum - 1);
-
-        if (listErr) {
-          throw new Error(`Failed to fetch bookings: ${listErr.message}`);
-        }
-
-        const items = (bookings ?? []).map((b: Record<string, unknown>) => {
-          const fac = Array.isArray(b.facility) ? b.facility[0] : b.facility;
-          const pay = Array.isArray(b.payment) ? b.payment[0] : b.payment;
+        const items = bookings.map((b) => {
+          const fac = b.SSP_Facility;
+          const pay = b.SSP_Payment;
           const payStatusRaw = String(
             (pay as Record<string, unknown> | null)?.payment_status ?? "",
           ).toLowerCase();
@@ -617,7 +600,9 @@ Deno.serve(
             payStatusRaw === "waiting_payment";
             
           return {
-            requestId: b.request_id,
+            requestId: b.request_id ?? b.name,
+            bookingId: b.recordType === "booking" ? b.name : null,
+            recordType: b.recordType,
             status: b.status,
             bookingStart: b.booking_start_date,
             bookingEnd: b.booking_end_date,
@@ -640,7 +625,7 @@ Deno.serve(
                 }
               : null,
             canCancel:
-              isPaymentPending &&
+              b.recordType === "request" && isPaymentPending &&
               ["waiting_payment", "requested"].includes(
                 String(b.status).toLowerCase(),
               ),

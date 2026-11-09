@@ -1,3 +1,4 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
 // deno-lint-ignore-file no-import-prefix no-explicit-any
 // ============================================
 // search-resident - Security gate lookup with pagination, filters & sorting
@@ -101,6 +102,7 @@ function buildErrorResponse(
 }
 
 function pickContact(row: ResidentRow): {
+  parkingSlot: string | null;
   name: string;
   phone: string;
   email: string;
@@ -108,6 +110,7 @@ function pickContact(row: ResidentRow): {
   const raw = row.SSP_Contact;
   const contact = Array.isArray(raw) ? raw[0] : raw;
   return {
+    parkingSlot: contactParkingSlot(contact),
     name: contact?.name ?? "",
     phone: contact?.phone ?? "",
     email: contact?.email ?? "",
@@ -429,7 +432,7 @@ Deno.serve(
           created_at,
           block,
           tower,
-          SSP_Contact:SSP_Contact!contact (
+          SSP_Contact:SSP_Contact!contact (parking_slot,
             name,
             phone,
             email
@@ -570,6 +573,7 @@ Deno.serve(
         };
 
         return {
+          parkingSlot: contactParkingSlot(contact),
           societyUserId: row.user_id ?? "",
           name: contact.name,
           phoneNumber: contact.phone,

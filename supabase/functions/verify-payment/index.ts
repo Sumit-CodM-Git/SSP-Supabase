@@ -113,6 +113,8 @@ serve(async (req)=>{
         // ----------------------------------------------------------
         const { error: bookingError } = await supabase.from("SSP_Facility_Booking").insert({
           requested_by: bookingRequest.requested_by,
+          // Preserve when the resident created the booking request.
+          created_at: bookingRequest.created_at ?? undefined,
           facility: bookingRequest.facility,
           payment: bookingRequest.payment,
           booking_start_date: bookingRequest.booking_start_date,

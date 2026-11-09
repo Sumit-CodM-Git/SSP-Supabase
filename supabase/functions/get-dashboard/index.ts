@@ -1,3 +1,4 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
 // ============================================
 // get-dashboard - Using Shared Middleware
 // ============================================
@@ -76,6 +77,7 @@ interface FormattedAlert {
 
 interface DashboardResponse {
     user: {
+    parkingSlot?: string | null;
         id: string;
         name: string;
         phone: string;
@@ -353,7 +355,7 @@ Deno.serve(
                     const { data: contactData, error: contactError } =
                         await supabaseAdmin
                             .from("SSP_Contact")
-                            .select(`contact_id, name, phone, email, gender`)
+                            .select(`parking_slot, contact_id, name, phone, email, gender`)
                             .eq("phone", userPhone)
                             .maybeSingle();
 
@@ -417,7 +419,7 @@ Deno.serve(
                 const { data: contact, error: contactError } =
                     await supabaseAdmin
                         .from("SSP_Contact")
-                        .select(`contact_id, name, phone, email, gender`)
+                        .select(`parking_slot, contact_id, name, phone, email, gender`)
                         .eq("contact_id", userData.contact)
                         .single();
 
@@ -554,7 +556,7 @@ async function buildDashboardResponse(
                 if (contactIds.length > 0) {
                     const { data: contacts } = await supabaseAdmin
                         .from("SSP_Contact")
-                        .select("contact_id, vehicle_type")
+                        .select("parking_slot, contact_id, vehicle_type")
                         .in("contact_id", contactIds);
 
                     if (contacts) {
@@ -633,6 +635,7 @@ async function buildDashboardResponse(
 
         const responseData: DashboardResponse = {
             user: {
+                parkingSlot: contactParkingSlot(user.contact),
                 id: user.user_id,
                 name: user.contact?.name || "User",
                 phone: user.contact?.phone || "",

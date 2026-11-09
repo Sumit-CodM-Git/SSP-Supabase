@@ -1,3 +1,4 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
 // import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // const corsHeaders = {
@@ -669,7 +670,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         .maybeSingle(),
       supabase
         .from("SSP_Society_User")
-        .select(`user_id, contact:contact(phone)`)
+        .select(`user_id, contact:contact(parking_slot, phone)`)
         .eq("user_id", authUser.id)
         .maybeSingle(),
     ]);
@@ -719,7 +720,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           user_id, role, user_type, user_ownership_type, status,
           move_in_date, unit_flat_number, created_at,
           agent_availability_status, service_agent_services,
-          contact:contact (
+          contact:contact (parking_slot,
             contact_id, name, phone, gender,
             id_proof_type, id_proof_number,
             email, occupation, whatsapp_phone, emergency_phone,
@@ -859,6 +860,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       ]);
 
       userDetail = {
+        parkingSlot: contactParkingSlot(matchedSocietyUser.contact),
         societyUserID: matchedSocietyUser.user_id,
         nonSocietyUserID: linkedNonSocietyUserId,
         vendorID: null,
@@ -972,7 +974,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (isAdmin) {
       const { data: allSocietyUsers } = await supabase
         .from("SSP_Society_User")
-        .select("user_type, contact:contact(vehicle_type)")
+        .select("user_type, contact:contact(parking_slot, vehicle_type)")
         .eq("society", societyId);
 
       let ownersCount = 0,
@@ -1056,6 +1058,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       );
       if (agentRecord?.contact) {
         serviceAgent = {
+          parkingSlot: contactParkingSlot(agentRecord.contact),
           agentId: agentRecord.user_id,
           name: agentRecord.contact.name,
           contactId: agentRecord.contact.contact_id,

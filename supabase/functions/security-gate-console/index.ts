@@ -1,3 +1,4 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
 /*import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -741,7 +742,7 @@ Deno.serve(
             hosted_by:SSP_Society_User!hosted_by(
               user_id,
               unit_flat_number,
-              contact:SSP_Contact(
+              contact:SSP_Contact(parking_slot,
                 name
               )
             )
@@ -961,7 +962,7 @@ Deno.serve(
               tower:SSP_Tower(
                 name
               ),
-              contact:SSP_Contact(
+              contact:SSP_Contact(parking_slot,
                 name
               )
             )
@@ -1110,6 +1111,7 @@ async function attachSignedURLsToVisitors(
       }
 
       return {
+        parkingSlot: contactParkingSlot(v.hosted_by?.contact),
         visitorId: v.non_society_user_id,
         name: v.name ?? "",
         phone: v.phone_number ?? "",

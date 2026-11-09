@@ -1,3 +1,4 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireAuth, AuthContext } from "../_shared/auth.ts";
 import {
@@ -143,6 +144,7 @@ interface DocumentListRow {
 }
 
 interface ProcessedVisitor {
+  parkingSlot?: string | null;
   visitorId: string;
   name: string;
   phone: string;
@@ -313,7 +315,7 @@ Deno.serve(
             hosted_by:SSP_Society_User!hosted_by(
               user_id,
               unit_flat_number,
-              contact:SSP_Contact(
+              contact:SSP_Contact(parking_slot,
                 name
               )
             )
@@ -489,7 +491,7 @@ Deno.serve(
                 tower:SSP_Tower(
                   name
                 ),
-                contact:SSP_Contact(
+                contact:SSP_Contact(parking_slot,
                   name
                 )
               )
@@ -617,7 +619,7 @@ Deno.serve(
                 tower:SSP_Tower(
                   name
                 ),
-                contact:SSP_Contact(
+                contact:SSP_Contact(parking_slot,
                   name
                 )
               )
@@ -723,7 +725,7 @@ Deno.serve(
               unit_flat_number,
               block:SSP_Block ( block_name ),
               tower:SSP_Tower ( name ),
-              contact:SSP_Contact ( name, phone )
+              contact:SSP_Contact (parking_slot, name, phone )
             `,
               { count: "exact" }
             )
@@ -765,6 +767,7 @@ Deno.serve(
                 : (row.tower as Record<string, unknown> | undefined);
 
               return {
+                parkingSlot: contactParkingSlot(rawContact),
                 phoneNumber: String(rawContact?.phone ?? ""),
                 name: String(rawContact?.name ?? ""),
                 flatNumber: String(row.unit_flat_number ?? cleanFlat),
@@ -1504,6 +1507,7 @@ async function attachSignedURLsToVisitors(
       }
 
       return {
+        parkingSlot: contactParkingSlot(v.hosted_by?.contact),
         visitorId: v.non_society_user_id,
         name: v.name ?? "",
         phone: v.phone_number ?? "",

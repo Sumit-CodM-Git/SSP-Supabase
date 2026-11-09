@@ -1,3 +1,4 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
 // ============================================
 // verify-otp - Verify OTP for Society Users & Vendors
 // ============================================
@@ -226,7 +227,7 @@ Deno.serve(
                     user_id,
                     role,
                     one_time_password_otp,
-                    contact:contact (
+                    contact:contact (parking_slot,
                         contact_id,
                         name,
                         phone,
@@ -341,6 +342,7 @@ Deno.serve(
             success: true,
             token: jwtToken,
             user: {
+              parkingSlot: contactParkingSlot(contact),
               id: matchedUser.user_id,
               name: userName,
               phone: contact?.phone || "",

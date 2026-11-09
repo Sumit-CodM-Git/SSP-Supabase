@@ -1,3 +1,4 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
 // // ============================================
 // // get-complaints - Get Complaints with Filters, Search & Pagination
 // // ============================================
@@ -1323,7 +1324,7 @@ Deno.serve(
                 tower,
                 block,
                 society,
-                contact:SSP_Contact!inner(
+                contact:SSP_Contact!inner(parking_slot,
                   contact_id,
                   name,
                   phone,
@@ -1451,6 +1452,7 @@ Deno.serve(
             : null;
 
           const residentDetails = {
+            parkingSlot: contactParkingSlot(residentContact),
             residentId: residentUser?.user_id || "",
             name: residentContact?.name || "Unknown",
             phone: residentContact?.phone || "",

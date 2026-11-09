@@ -1,3 +1,4 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
 // import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // const corsHeaders = {
@@ -1373,7 +1374,7 @@ Deno.serve(
         .select(`
           user_id,
           unit_flat_number,
-          contact:contact (
+          contact:contact (parking_slot,
             name,
             phone,
             email
@@ -1573,6 +1574,7 @@ Deno.serve(
       // STEP 9: Resident details
       // --------------------------------------------------
       const residentResponseDetails = {
+        parkingSlot: contactParkingSlot(contactData),
         residentId: residentData.user_id,
         name: contactData?.name || "Unknown",
         phone: contactData?.phone || "",

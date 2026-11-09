@@ -1,3 +1,5 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
+import { normalizeParkingSlot } from "../_shared/contact.ts";
 // // deno-lint-ignore-file no-import-prefix no-explicit-any
 // // ============================================
 // // crud-family — Merged CRUD for family members
@@ -1402,6 +1404,8 @@ interface CrudFamilyRequest {
     whatsAppPhone?: string;
     emergencyPhone?: string;
     vehicleNumber?: string;
+    parkingSlot?: string | null;
+    parking_slot?: string | null;
     vehicleType?: string;
     role?: string | string[];
     status?: "active" | "inactive" | boolean;
@@ -1736,7 +1740,7 @@ async function handleCreate(
         .from("SSP_Society_User")
         .select(`
             user_id,
-            contact:SSP_Contact!inner ( phone )
+            contact:SSP_Contact!inner (parking_slot, phone )
         `)
         .eq("society", ctx.callerSocietyId)
         .eq("unit_flat_number", ctx.callerFlat)
@@ -1744,7 +1748,7 @@ async function handleCreate(
 
     const existingContactPromise = admin
         .from("SSP_Contact")
-        .select("contact_id")
+        .select("contact_id, parking_slot")
         .eq("society", ctx.callerSocietyId)
         .eq("phone", phone)
         .maybeSingle();
@@ -1793,6 +1797,12 @@ async function handleCreate(
 
     if (existingContactRes.data?.contact_id) {
         contactId = existingContactRes.data.contact_id;
+        const parkingSlot = normalizeParkingSlot(body.parkingSlot !== undefined ? body.parkingSlot : body.parking_slot);
+        if (parkingSlot !== undefined) {
+            const { error: parkingErr } = await admin.from("SSP_Contact")
+                .update({ parking_slot: parkingSlot }).eq("contact_id", contactId);
+            if (parkingErr) return buildError(req, "SERVER_ERROR", "Failed to update contact parking slot.", 500);
+        }
     } else {
         const { data: newContact, error: cErr } = await admin
             .from("SSP_Contact")
@@ -1811,6 +1821,7 @@ async function handleCreate(
                 vehicle_registration_number:
                     cleanText(body.vehicleNumber, 30) || null,
                 vehicle_type: cleanText(body.vehicleType, 30) || null,
+                parking_slot: normalizeParkingSlot(body.parkingSlot !== undefined ? body.parkingSlot : body.parking_slot) ?? null,
             })
             .select("contact_id")
             .single();
@@ -1863,6 +1874,9 @@ async function handleCreate(
             action: "CREATE",
             residentId: newUser.user_id,
             contactId,
+            parkingSlot: (body.parkingSlot !== undefined || body.parking_slot !== undefined)
+                ? normalizeParkingSlot(body.parkingSlot !== undefined ? body.parkingSlot : body.parking_slot)
+                : existingContactRes.data?.parking_slot ?? null,
         },
     });
 }
@@ -1898,7 +1912,7 @@ async function handleView(
             tower,
             block,
             created_at,
-            contact:SSP_Contact!inner(
+            contact:SSP_Contact!inner(parking_slot,
                 contact_id, name, phone, email, gender, occupation, description,
                 id_proof_type, id_proof_number, whatsapp_phone, emergency_phone,
                 vehicle_registration_number, vehicle_type, created_at
@@ -2009,6 +2023,7 @@ async function handleView(
         const ownership = String(m.user_ownership_type ?? "").trim();
 
         return {
+            parkingSlot: contactParkingSlot(cObj),
             residentId: m.user_id ?? "",
             name: cObj.name ?? "",
             phone: cObj.phone ?? "",
@@ -2115,6 +2130,8 @@ async function handleUpdate(
 
     // ---- Build contact updates ----
     const cu: Record<string, unknown> = {};
+    const parkingSlot = normalizeParkingSlot(body.parkingSlot !== undefined ? body.parkingSlot : body.parking_slot);
+    if (parkingSlot !== undefined) cu.parking_slot = parkingSlot;
     if (body.memberName !== undefined) {
         const v = cleanText(body.memberName, 150);
         if (!v) {
@@ -2275,7 +2292,7 @@ async function handleUpdate(
     console.log(`[crud-family][UPDATE] TOTAL ${Date.now() - t0}ms`);
 
     return buildSuccess(req, {
-        familyUpdate: { updated: true, action: "UPDATE", residentId: targetId },
+        familyUpdate: { updated: true, action: "UPDATE", residentId: targetId, ...(parkingSlot !== undefined ? { parkingSlot } : {}) },
     });
 }
 

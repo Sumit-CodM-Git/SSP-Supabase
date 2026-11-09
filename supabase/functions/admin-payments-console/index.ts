@@ -1,3 +1,4 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
 import { requireAuth, type AuthContext } from "../_shared/auth.ts";
 import {
   corsHeaders,
@@ -100,6 +101,7 @@ interface RawPaymentRow {
 
 interface RawBookingRequest {
   request_id: string;
+  created_at: string | null;
   requested_by: string | null;
   facility: string;
   payment: string;
@@ -352,7 +354,7 @@ Deno.serve(
             society_user:SSP_Society_User!inner(
               unit_flat_number,
               society,
-              contact:SSP_Contact( name )
+              contact:SSP_Contact(parking_slot, name )
             ),
             SSP_Document ( s3_path, file_name )
           `,
@@ -376,7 +378,7 @@ Deno.serve(
             .select(`
               user_id,
               unit_flat_number,
-              contact:SSP_Contact( name )
+              contact:SSP_Contact(parking_slot, name )
             `)
             .eq("society", society.society_id);
 
@@ -444,6 +446,7 @@ Deno.serve(
           const clickableImageUrl = signedReceipts[idx] || "N/A";
 
           return {
+            parkingSlot: contactParkingSlot(contact),
             paymentName: p.payment_id ?? "N/A",
             amount: p.amount != null ? String(p.amount) : "0",
             dueDate: p.due_date ? String(p.due_date) : null,
@@ -602,6 +605,8 @@ Deno.serve(
               .from("SSP_Facility_Booking")
               .insert({
                 requested_by: req.requested_by,
+                // Preserve when the resident created the booking request.
+                created_at: req.created_at ?? undefined,
                 facility: req.facility,
                 payment: req.payment,
                 booking_start_date: req.booking_start_date,

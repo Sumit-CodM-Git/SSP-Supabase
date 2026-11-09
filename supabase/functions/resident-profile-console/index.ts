@@ -1,3 +1,5 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
+import { normalizeParkingSlot } from "../_shared/contact.ts";
 import { type AuthContext, requireAuth } from "../_shared/auth.ts";
 import {
   corsHeaders,
@@ -126,6 +128,8 @@ interface MergedRequest {
   idProofNumber?: string | null;
   vehicleType?: string | null;
   vehicleRegNo?: string | null;
+  parkingSlot?: string | null;
+  parking_slot?: string | null;
   email?: string | null;
   phone?: string | null;
   whatsAppPhone?: string | null;
@@ -277,6 +281,7 @@ function buildProfile(record: ResidentProfileRecord, society: SocietyContext) {
   return {
     userId: record.user_id ?? "NA",
     personalInformation: {
+      parkingSlot: contactParkingSlot(rawContact),
       Name: capitalizeName(String(rawContact?.name ?? "NA")),
       gender: String(rawContact?.gender ?? "NA"),
       occupation: String(rawContact?.occupation ?? "NA"),
@@ -289,6 +294,7 @@ function buildProfile(record: ResidentProfileRecord, society: SocietyContext) {
       ),
     },
     contactInformation: {
+      parkingSlot: contactParkingSlot(rawContact),
       contactID: String(rawContact?.contact_id ?? "NA"),
       email: String(rawContact?.email ?? "NA"),
       phone: String(rawContact?.phone ?? "NA"),
@@ -696,7 +702,7 @@ Deno.serve(
           .select(`
             user_id, unit_flat_number, status, move_in_date, move_out_date,
             user_ownership_type, user_type, role,
-            contact:SSP_Contact!inner(
+            contact:SSP_Contact!inner(parking_slot,
               contact_id, name, phone, email, whatsapp_phone, gender,
               emergency_phone, occupation, vehicle_type, vehicle_registration_number,
               id_proof_type, id_proof_number
@@ -822,7 +828,7 @@ Deno.serve(
               move_out_date,
               tower:SSP_Tower(tower_id, name),
               block:SSP_Block(block_id, block_name),
-              contact:SSP_Contact!inner(
+              contact:SSP_Contact!inner(parking_slot,
                 contact_id,
                 name,
                 description,
@@ -1033,7 +1039,7 @@ Deno.serve(
           .select(`
             user_id,
             role,
-            contact:SSP_Contact!inner(contact_id, name)
+            contact:SSP_Contact!inner(parking_slot, contact_id, name)
           `)
           .eq("society", societyContext.society_id);
 
@@ -1084,6 +1090,8 @@ Deno.serve(
         // FIELD VALIDATION — all in one try/catch so bad input → 400
         // =================================================================
         const contactUpdates: Record<string, unknown> = {};
+        const parkingSlot = normalizeParkingSlot(body.parkingSlot !== undefined ? body.parkingSlot : body.parking_slot);
+        if (parkingSlot !== undefined) contactUpdates.parking_slot = parkingSlot;
         const userUpdates: Record<string, unknown> = {};
 
         try {
@@ -1467,6 +1475,7 @@ Deno.serve(
                 `Profile for identifier '${cleanResidentId}' updated successfully.`,
               recordId: su.user_id,
               contactId: targetContactId,
+              ...(parkingSlot !== undefined ? { parkingSlot } : {}),
             },
           }),
         );

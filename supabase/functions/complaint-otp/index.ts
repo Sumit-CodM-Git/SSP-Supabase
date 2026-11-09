@@ -123,9 +123,6 @@ Deno.serve(
               "Start OTP is only valid when the complaint is assigned.",
             );
           }
-          if (c.start_otp_verified_at) {
-            return errorResponse("Start OTP already verified.");
-          }
         } else {
           if (c.status !== COMPLAINT_STATUS.IN_PROGRESS) {
             return errorResponse(
@@ -139,7 +136,11 @@ Deno.serve(
 
         const generated = generateDateOtp();
         const patch = stg === OTP_STAGE.START
-          ? { start_otp: generated }
+          ? {
+            start_otp: generated,
+            start_otp_generated_at: getCurrentTimestamp(),
+            start_otp_verified_at: null,
+          }
           : { end_otp: generated };
 
         const { error: upErr } = await supabaseAdmin

@@ -1,3 +1,4 @@
+import { normalizeParkingSlot } from "../_shared/contact.ts";
 /*import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -291,7 +292,7 @@ serve(async (req: Request): Promise<Response> => {
           move_out_date,
           tower:SSP_Tower(tower_id, name),
           block:SSP_Block(block_id, block_name),
-          contact:SSP_Contact!inner(
+          contact:SSP_Contact!inner(parking_slot,
             contact_id,
             name,
             description,
@@ -387,7 +388,7 @@ serve(async (req: Request): Promise<Response> => {
         `
         user_id,
         role,
-        contact:SSP_Contact!inner(contact_id, name)
+        contact:SSP_Contact!inner(parking_slot, contact_id, name)
       `,
       )
       .eq("society", societyContext.society_id);
@@ -425,6 +426,8 @@ serve(async (req: Request): Promise<Response> => {
 
     // Build Mutation Object Dictionaries
     const contactUpdates: Record<string, unknown> = {};
+    const parkingSlot = normalizeParkingSlot(requestObj.parkingSlot !== undefined ? requestObj.parkingSlot : requestObj.parking_slot);
+    if (parkingSlot !== undefined) contactUpdates.parking_slot = parkingSlot;
     const userUpdates: Record<string, unknown> = {};
 
     // Validation & Population: SSP_Contact Fields
@@ -528,6 +531,7 @@ serve(async (req: Request): Promise<Response> => {
           updated: `Profile for identifier '${cleanResidentId}' updated successfully.`,
           recordId: su.user_id,
           contactId: targetContactId,
+          ...(parkingSlot !== undefined ? { parkingSlot } : {}),
         },
         errorResponse: null,
       }),

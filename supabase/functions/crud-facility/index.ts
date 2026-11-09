@@ -1287,7 +1287,7 @@ async function authorizeAdmin(
 
     const { data: admins, error: adminErr } = await supabase
       .from("SSP_Society_User")
-      .select("role, SSP_Contact!contact (phone)")
+      .select("role, SSP_Contact!contact (parking_slot, phone)")
       .eq("society", society.society_id);
 
     if (adminErr) {

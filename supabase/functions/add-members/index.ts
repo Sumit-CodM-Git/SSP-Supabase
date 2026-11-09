@@ -1,3 +1,4 @@
+import { normalizeParkingSlot } from "../_shared/contact.ts";
 // // deno-lint-ignore-file no-explicit-any no-unused-vars prefer-const
 // import { requireAuth } from "../_shared/auth.ts";
 // import {
@@ -876,6 +877,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 // ============================================
 interface MemberData {
   fullName: string;
+  parkingSlot?: string | null;
+  parking_slot?: string | null;
   phone: string;
   idProofType: string;
   idProofNumber: string;
@@ -1125,6 +1128,7 @@ async function createOrGetContact(
     gender: string | null;
     idProofType: string | null;
     vehicleType: string | null;
+    parkingSlot: string | null;
   };
 }> {
   const namePhoneKey = `${data.fullName}_${data.phone}`;
@@ -1152,10 +1156,13 @@ async function createOrGetContact(
     data.vehicleType,
   );
 
+  const parkingSlot = normalizeParkingSlot(data.parkingSlot !== undefined ? data.parkingSlot : data.parking_slot);
+
   const normalized = {
     gender: normGender,
     idProofType: normIdProofType,
     vehicleType: normVehicleType,
+    parkingSlot: parkingSlot ?? null,
   };
 
   const matchedContact = existingContactMap.get(namePhoneKey) ||
@@ -1163,9 +1170,11 @@ async function createOrGetContact(
     (phoneOnlyKey ? existingContactMap.get(phoneOnlyKey) : null);
 
   if (matchedContact) {
+    normalized.parkingSlot = parkingSlot === undefined ? matchedContact.parking_slot ?? null : parkingSlot;
     console.log(`📝 Updating existing contact: ${matchedContact.contact_id}`);
 
     const updatePayload: any = {};
+    if (parkingSlot !== undefined) updatePayload.parking_slot = parkingSlot;
     if (data.email) updatePayload.email = data.email;
     if (normGender) updatePayload.gender = normGender;
     if (data.occupation) updatePayload.occupation = data.occupation;
@@ -1200,6 +1209,7 @@ async function createOrGetContact(
   }
 
   const newContactPayload = {
+    parking_slot: parkingSlot ?? null,
     name: data.fullName,
     phone: phoneOnlyKey || null,
     email: data.email || null,
@@ -1638,7 +1648,7 @@ Deno.serve(
       const { data: existingContacts, error: contactFetchErr } =
         await supabaseAdmin
           .from("SSP_Contact")
-          .select("contact_id, name, phone, id_proof_number")
+          .select("parking_slot, contact_id, name, phone, id_proof_number")
           .in("name", fullNameSet)
           .in("phone", phoneSet);
 
@@ -1710,6 +1720,7 @@ Deno.serve(
           registrationNumber: society.registration_number,
           isNewContact: isNew,
           vehicleType: contactNorm.vehicleType,
+          parkingSlot: contactNorm.parkingSlot,
           idProofType: contactNorm.idProofType,
           idProofNumber: data.idProofNumber,
           emergencyPhone: data.emergencyPhone || null,

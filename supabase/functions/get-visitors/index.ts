@@ -1,3 +1,4 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
 // import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // const corsHeaders = {
@@ -1078,6 +1079,7 @@ interface VisitorResponse {
   status: string | null;
   approvalStatus: string | null;
   hostedBy: {
+    parkingSlot?: string | null;
     residentId: string;
     name: string;
     phone: string;
@@ -1456,6 +1458,7 @@ function normalizeVisitorData(
     approvalStatus: rawVisitor.visitor_approval_status || null,
     hostedBy: hostedByData
       ? {
+          parkingSlot: contactParkingSlot(contact),
           residentId: hostedByData.user_id,
           name: contact?.name || "Unknown",
           phone: contact?.phone || "",
@@ -1604,7 +1607,7 @@ Deno.serve(
             tower:SSP_Tower!left (
               name
             ),
-            contact:contact (
+            contact:contact (parking_slot,
               name,
               phone
             )

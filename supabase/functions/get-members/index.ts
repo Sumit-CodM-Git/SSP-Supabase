@@ -1,3 +1,4 @@
+import { contactParkingSlot } from "../_shared/contact.ts";
 // import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // const corsHeaders = {
@@ -351,6 +352,7 @@ interface MemberTower {
 }
 
 interface MemberResponse {
+  parkingSlot?: string | null;
   societyName: string;
   memberId: string;
   role: string;
@@ -653,7 +655,7 @@ Deno.serve(
                             tower_id,
                             name
                         ),
-                        SSP_Contact!left (
+                        SSP_Contact!left (parking_slot,
                             contact_id,
                             name,
                             phone,
@@ -706,6 +708,7 @@ Deno.serve(
 
             for (const singleRole of roles) {
               allMembers.push({
+                parkingSlot: contactParkingSlot(contactData),
                 societyName: society.society_name || "NA",
                 memberId: su.user_id || "NA",
                 role: singleRole,
