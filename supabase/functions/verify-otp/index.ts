@@ -384,7 +384,7 @@ Deno.serve(
                         registration_number
                     )
                 `)
-        .eq("role", "Vendor"); // ✅ Only fetch vendors
+        .ilike("role", "vendor"); // Accept existing vendor role casing
 
       if (vendorError) {
         console.error("❌ Vendor fetch error:", vendorError);

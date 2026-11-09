@@ -1,3 +1,4 @@
+import { receiptExists } from "../_shared/receipt-storage.ts";
 import { requireAuth, type AuthContext } from "../_shared/auth.ts";
 import {
   corsHeaders,
@@ -24,7 +25,7 @@ const logger = createLogger("resident-payments-console");
 // ============================================
 // TYPES
 // ============================================
-type ActionType = "SUBMIT_PAYMENT" | "FETCH_OWN";
+type ActionType = "SUBMIT_PAYMENT" | "CONFIRM_RECEIPT_UPLOAD" | "FETCH_OWN";
 
 interface MergedRequest {
   actionType: ActionType;
@@ -187,7 +188,7 @@ Deno.serve(
       }
 
       const cleanAction = String(actionType).trim().toUpperCase() as ActionType;
-      const ALLOWED: ActionType[] = ["SUBMIT_PAYMENT", "FETCH_OWN"];
+      const ALLOWED: ActionType[] = ["SUBMIT_PAYMENT", "CONFIRM_RECEIPT_UPLOAD", "FETCH_OWN"];
       if (!ALLOWED.includes(cleanAction)) {
         return errorResponse(
           `Invalid actionType: ${actionType}. Allowed: ${ALLOWED.join(", ")}.`,
@@ -257,6 +258,46 @@ Deno.serve(
       }
 
       const targetResidentId = userId; // always JWT-derived
+
+      // Optional verification for clients that support upload confirmation.
+      // Legacy SUBMIT_PAYMENT keeps its existing status and response contract.
+      if (cleanAction === "CONFIRM_RECEIPT_UPLOAD") {
+        if (!body.paymentId) return errorResponse("paymentId is mandatory.", 422);
+        const { data: payment, error: paymentError } = await supabaseAdmin
+          .from("SSP_Payment")
+          .select("pay_rec_id, payment_status, receipt_url")
+          .eq("payment_id", String(body.paymentId).trim())
+          .eq("society_user", targetResidentId).maybeSingle();
+        if (paymentError) throw paymentError;
+        if (!payment) return errorResponse("Target payment record profile instance not found.", 404);
+        const { data: documents, error: documentError } = await supabaseAdmin
+          .from("SSP_Document").select("s3_path")
+          .eq("payment", payment.pay_rec_id).eq("society", society.society_id);
+        if (documentError) throw documentError;
+        const paths = [...new Set<string>([
+          payment.receipt_url,
+          ...(documents ?? []).map((doc: { s3_path: string | null }) => doc.s3_path),
+        ].filter((path): path is string => typeof path === "string" && !!path.trim()))];
+        const checks = await Promise.all(paths.map(path => receiptExists(supabaseAdmin, path)));
+        if (!checks.some(Boolean)) return errorResponse("Receipt upload is incomplete. Upload the image before confirming payment.", 409);
+        const previousStatus = String(payment.payment_status ?? "").trim().toUpperCase();
+        const needsReview = ["UNPAID", "REJECTED", ""].includes(previousStatus);
+        if (needsReview) {
+          const { error: updateError } = await supabaseAdmin.from("SSP_Payment")
+            .update({ payment_status: "UNDER REVIEW" })
+            .eq("pay_rec_id", payment.pay_rec_id).eq("society_user", targetResidentId)
+            .eq("payment_status", payment.payment_status);
+          if (updateError) throw updateError;
+        }
+        return successResponse(asPayload({
+          paymentSubmission: {
+            submitted: true,
+            receiptUploadStatus: "uploaded",
+            paymentRecordId: payment.pay_rec_id,
+            status: needsReview ? "UNDER REVIEW" : previousStatus,
+          },
+        }));
+      }
 
       // =====================================================================
       // ACTION 1: SUBMIT_PAYMENT

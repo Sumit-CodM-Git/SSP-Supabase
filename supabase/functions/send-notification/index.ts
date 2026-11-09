@@ -61,6 +61,25 @@ serve(async (req) => {
     const recipientId = notification.recipient_id;
     const recipientType = notification.recipient_type;
 
+    // Recheck the current visitor, including notifications queued before OTP gating was deployed.
+    if (notification.reference_table === "SSP_Non_Society_User" &&
+        String(recipientType).toLowerCase() === "resident") {
+      const { data: visitor, error: visitorError } = await supabase
+        .from("SSP_Non_Society_User").select("is_otp_verified,role")
+        .eq("non_society_user_id", notification.reference_id).maybeSingle();
+      if (visitorError) throw new Error(`Visitor verification check failed: ${visitorError.message}`);
+      if (!visitor || (visitor.role === "visitor" && visitor.is_otp_verified !== true)) {
+        await supabase.from("SSP_Notification").update({
+          delivery_status: "failed",
+          extra_data: { ...(notification.extra_data ?? {}), suppressedReason: "visitor_phone_not_verified" },
+        }).eq("notification_id", notificationId);
+        return new Response(JSON.stringify({ success: true, skipped: true, reason: "visitor_phone_not_verified" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
+
     // === DEBUG — who do we think we're looking for? ===
     console.log("DBG_RECIPIENT", JSON.stringify({
       recipientId: recipientId,

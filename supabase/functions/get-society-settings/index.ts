@@ -1,3 +1,4 @@
+import { parkingCounts } from "../_shared/parking-counts.ts";
 // deno-lint-ignore-file no-import-prefix
 // ============================================
 // get-society-settings - Settings Page Loader
@@ -172,6 +173,7 @@ function formatTower(row: TowerRow) {
         active: row.active,
         floors: row.floors ?? 0,
         flatsPerFloor: row.flats_per_floor ?? 0,
+        totalFlats: Number(row.floors ?? 0) * Number(row.flats_per_floor ?? 0),
         createdAt: row.created_at,
     };
 }
@@ -448,6 +450,7 @@ serve(async (req: Request) => {
             ? society.amenities
             : [];
 
+        const parking = parkingCounts(society);
         // ── Build response ──
         const response = {
             society: {
@@ -459,8 +462,8 @@ serve(async (req: Request) => {
                 phoneNumber: society.phone_number,
                 email: society.email,
                 totalUnits: Number(society.total_unit ?? 0),
-                openParkingCount: Number(society.open_parking ?? 0),
-                coveredParkingCount: Number(society.covered_parking ?? 0),
+                openParkingCount: parking.vacantParking,
+                coveredParkingCount: parking.occupiedParking,
                 totalParkingSlot: society.parking_slot ?? "0",
                 currentAmenities: societyAmenities,
             },

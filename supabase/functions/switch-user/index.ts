@@ -1,3 +1,4 @@
+import { parkingCounts } from "../_shared/parking-counts.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 // import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -485,6 +486,7 @@ interface SocietyInfo {
   city: string | null;
   total_unit: number | null;
   parking_slot: string | number | null;
+  covered_parking: number | null;
 }
 
 interface SocietyUserRecord {
@@ -728,7 +730,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           ),
           society:society (
             society_id, society_name, registration_number,
-            subscription_plan, address_line1, city, total_unit, parking_slot
+            subscription_plan, address_line1, city, total_unit, parking_slot, covered_parking
           ),
           tower:tower (*), block:block (*)
         `
@@ -993,7 +995,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
 
       const totalUnits = Number(societyRecord.total_unit) || 0;
-      const totalParking = Number(societyRecord.parking_slot) || 0;
+      const parking = parkingCounts(societyRecord);
       const occupiedFlats = ownersCount + tenantsCount;
 
       societyDetail = {
@@ -1009,10 +1011,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         tenants: tenantsCount,
         twoWheelers,
         fourWheelers,
-        vacantParkingSlots: Math.max(
-          0,
-          totalParking - (twoWheelers + fourWheelers)
-        ),
+        vacantParkingSlots: parking.vacantParking,
       };
     } else {
       societyDetail = {

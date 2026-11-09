@@ -1,3 +1,4 @@
+import { findVisitorDraft, isVisitorOtpDraft, canCompleteVisitorDetails, VisitorDraftError } from "../_shared/visitor-drafts.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireAuth, AuthContext } from "../_shared/auth.ts";
@@ -85,6 +86,7 @@ interface UnifiedSecurityPayload {
   newStatus?: string;
   visitorName?: string;
   phone?: string;
+  phoneNumber?: string;
   email?: string;
   gender?: string;
   role?: string;
@@ -299,6 +301,9 @@ Deno.serve(
 
         // --- BRANCH 1: FETCH_PRE_APPROVALS ---
         if (currentAction === "FETCH_PRE_APPROVALS") {
+          const searchValue = searchTerm?.trim() ?? "";
+          const searchPattern = `%${searchValue.replace(/[\\%_]/g, "\\$&")}%`;
+          const flatFilter = requestObj.flatNumber?.trim();
           const SELECT_COLUMNS = `
             non_society_user_id,
             name,
@@ -312,34 +317,35 @@ Deno.serve(
             check_in,
             check_out,
             created_at,
-            hosted_by:SSP_Society_User!hosted_by(
+            hosted_by:SSP_Society_User!hosted_by${flatFilter ? "!inner" : ""}(
               user_id,
               unit_flat_number,
               contact:SSP_Contact(parking_slot,
                 name
               )
             )
+            ${searchValue ? ", search_host:SSP_Society_User!hosted_by()" : ""}
           `;
 
           const buildBaseQuery = () => {
+            const statuses = "visitor_status.is.null,visitor_status.ilike.Pending,visitor_status.ilike.Approved,visitor_status.ilike.expected";
+            const search = searchValue ? [
+              ...["name", "phone_number", "vehicle_number"].map(
+                field => `${field}.ilike.${JSON.stringify(searchPattern)}`,
+              ),
+              "search_host.not.is.null",
+            ].join(",") : null;
             let q = supabaseAdmin
               .from("SSP_Non_Society_User")
               .select(SELECT_COLUMNS, { count: "exact" })
               .eq("society", societyId)
-              .or(
-                "visitor_status.is.null,visitor_status.ilike.Pending,visitor_status.ilike.Approved"
-              );
+              .or(search ? `and(or(${statuses}),or(${search}))` : statuses);
 
             if (requestObj.societyUserId) {
-              q = q.eq("hosted_by.user_id", requestObj.societyUserId.trim());
+              q = q.eq("hosted_by", requestObj.societyUserId.trim());
             }
-
-            if (searchTerm && searchTerm.trim() !== "") {
-              const cleanSearch = searchTerm.trim();
-              q = q.or(
-                `name.ilike.%${cleanSearch}%,phone_number.ilike.%${cleanSearch}%,vehicle_number.ilike.%${cleanSearch}%`
-              );
-            }
+            if (flatFilter) q = q.eq("hosted_by.unit_flat_number", flatFilter);
+            if (searchValue) q = q.ilike("search_host.unit_flat_number", searchPattern);
             return q;
           };
 
@@ -422,6 +428,7 @@ Deno.serve(
         else if (currentAction === "REQUEST_APPROVAL") {
           const hostedByUuid = nullIfBlank(requestObj.societyUserId);
           const approverUuid = nullIfBlank(requestObj.securityGuardId);
+          if (!hostedByUuid) return errorResponse("societyUserId is required to request resident approval.", 400);
 
           if (hostedByUuid) {
             const { data: resident } = await supabaseAdmin
@@ -445,11 +452,20 @@ Deno.serve(
 
           const normalizedRole = normalizeVisitorRole(requestObj.role);
 
-          const { data: newVisitor, error: insertErr } = await supabaseAdmin
-            .from("SSP_Non_Society_User")
-            .insert({
-              name: nullIfBlank(requestObj.visitorName) ?? "Unknown",
-              phone_number: nullIfBlank(requestObj.phone),
+          const phone = nullIfBlank(requestObj.phone) ?? nullIfBlank(requestObj.phoneNumber);
+          const draft = await findVisitorDraft(supabaseAdmin, hostedByUuid, societyId, phone, visitorId?.trim());
+          const visitorName = nullIfBlank(requestObj.visitorName);
+          const visitorPhone = phone ?? draft?.phone_number;
+          if (!visitorName || !visitorPhone) return errorResponse("visitorName and phone/phoneNumber (or an OTP visitorId) are required.", 400);
+          const reusable = draft && (isVisitorOtpDraft(draft) || canCompleteVisitorDetails(draft));
+          const keepDecision = draft && ["approved", "rejected"].includes(String(draft.visitor_approval_status ?? "").toLowerCase());
+          const submitted = draft && !reusable;
+          if (submitted && (draft.name !== visitorName || draft.phone_number !== visitorPhone)) {
+            return errorResponse("This visitor has already been submitted with different details.", 409);
+          }
+          const visitorPayload = {
+              name: visitorName,
+              phone_number: visitorPhone,
               delivery_origin: nullIfBlank(requestObj.platform),
               vehicle_number: nullIfBlank(requestObj.vehicleNumber),
               purpose: nullIfBlank(requestObj.purpose),
@@ -460,14 +476,23 @@ Deno.serve(
               id_proof_number: nullIfBlank(requestObj.idProofNumber),
               gate_no: nullIfBlank(requestObj.gateNumber),
               vehicle_type: nullIfBlank(requestObj.vehicleType),
-              visitor_status: "Pending",
-              pre_approved: false,
+              visitor_status: keepDecision ? draft.visitor_status : "Pending",
+              visitor_approval_status: keepDecision ? draft.visitor_approval_status : "pending",
+              is_otp_verified: draft?.is_otp_verified === true,
+              pre_approved: keepDecision ? draft.pre_approved : false,
               check_in: null,
               check_out: null,
               hosted_by: hostedByUuid,
               approver: approverUuid,
               society: societyId,
-            })
+            };
+          const visitorTable = supabaseAdmin.from("SSP_Non_Society_User");
+          const visitorWrite = submitted
+            ? visitorTable.select("*").eq("non_society_user_id", draft.non_society_user_id)
+            : reusable
+            ? visitorTable.update(visitorPayload).eq("non_society_user_id", draft.non_society_user_id).eq("hosted_by", hostedByUuid).eq("society", societyId).eq("name", "Unknown Visitor").eq("visitor_status", draft.visitor_status)
+            : visitorTable.insert(visitorPayload);
+          const { data: newVisitor, error: insertErr } = await visitorWrite
             .select(
               `
               non_society_user_id,
@@ -1451,6 +1476,7 @@ Deno.serve(
 
       return errorResponse("Invalid or unmapped actionType / operation.", 400);
     } catch (error: unknown) {
+      if (error instanceof VisitorDraftError) return errorResponse(error.message, error.status);
       const err = error as Error;
       logger.error({
         action: "security_unified_console_error",

@@ -1,3 +1,4 @@
+import { parkingCounts } from "../_shared/parking-counts.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 // ============================================
 // get-dashboard - Using Shared Middleware
@@ -28,6 +29,7 @@ interface Society {
     state: string;
     total_unit: number;
     parking_slot: number;
+    covered_parking: number | null;
 }
 
 // ✅ Camel-case response shapes
@@ -444,7 +446,8 @@ Deno.serve(
                         city,
                         state,
                         total_unit,
-                        parking_slot
+                        parking_slot,
+                        covered_parking
                     `)
                         .eq("society_id", userData.society)
                         .single();
@@ -584,8 +587,7 @@ async function buildDashboardResponse(
 
         const totalFlats = Number(user.society?.total_unit ?? 0);
         const occupiedFlats = owners + tenants;
-        const totalParking = Number(user.society?.parking_slot ?? 0);
-        const occupiedParking = twoWheelers + fourWheelers;
+        const { totalParking, occupiedParking, vacantParking } = parkingCounts(user.society);
 
         let totalComplaints = 0, pendingComplaints = 0, resolvedComplaints = 0;
         let upcomingBookings = 0, confirmedBookings = 0;
@@ -670,7 +672,7 @@ async function buildDashboardResponse(
                     totalParking: totalParking || 0,
                     occupiedParking: occupiedParking || 0,
                     vacantParking:
-                        Math.max(0, totalParking - occupiedParking) || 0,
+                        vacantParking,
                     twoWheelers: twoWheelers || 0,
                     fourWheelers: fourWheelers || 0,
                 },

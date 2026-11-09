@@ -261,7 +261,7 @@ Deno.serve(
           role,
           society:SSP_Society (registration_number)
         `)
-        .eq("role", "Vendor"); // ✅ Only fetch vendors
+        .ilike("role", "vendor"); // Accept existing vendor role casing
 
       if (vError) {
         return createOTPErrorResponse("QUERY_ERROR", vError.message, 400);

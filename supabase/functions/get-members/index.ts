@@ -352,7 +352,7 @@ interface MemberTower {
 }
 
 interface MemberResponse {
-  parkingSlot?: string | null;
+  parkingSlot: string | null;
   societyName: string;
   memberId: string;
   role: string;
@@ -390,6 +390,7 @@ interface MemberResponse {
   vendorId: string;
   vendorRating: string;
   recordId: string | null;
+  createdAt: string | null;
 }
 
 // ============================================
@@ -520,7 +521,6 @@ const supabaseAdmin = createClient(
 
 Deno.serve(
   requireAuth(async (req: Request, authCtx: any) => {
-    // Handle CORS preflight
     if (req.method === "OPTIONS") {
       return new Response("ok", { headers: corsHeaders });
     }
@@ -531,12 +531,10 @@ Deno.serve(
       console.log("📊 get-members called");
       console.log(`👤 Authenticated user: ${authCtx.user.id}`);
 
-      // Only allow POST method
       if (req.method !== "POST") {
         return errorResponse("Only POST method is allowed.", 405);
       }
 
-      // Parse request body
       const body = await req.json().catch(() => null);
       if (!body) {
         return errorResponse("Request body is required.", 400);
@@ -554,7 +552,6 @@ Deno.serve(
         status,
       } = body;
 
-      // Validate required fields
       if (!registrationNumber) {
         return errorResponse("registrationNumber is mandatory.", 400);
       }
@@ -562,9 +559,8 @@ Deno.serve(
       const regNum = String(registrationNumber).trim();
       const roleInput = role ? String(role).trim() : "all";
 
-      // Pagination params (with defaults)
       const pageNum = Number(page) || 1;
-      const limitNum = Math.min(Number(limit) || 20, 100); // Max 100 per page
+      const limitNum = Math.min(Number(limit) || 20, 100);
 
       console.log(`🔍 Fetching members for society: ${regNum}`);
       console.log(`📄 Pagination: page=${pageNum}, limit=${limitNum}`);
@@ -633,6 +629,7 @@ Deno.serve(
           .select(`
                         user_id,
                         role,
+                        created_at,
                         agent_availability_status,
                         service_agent_services,
                         move_in_date,
@@ -672,12 +669,10 @@ Deno.serve(
                     `)
           .eq("society", socId);
 
-        // Apply filters
         if (flat) query = query.eq("unit_flat_number", String(flat).trim());
         if (resolvedBlockId) query = query.eq("block", resolvedBlockId);
         if (resolvedTowerId) query = query.eq("tower", resolvedTowerId);
 
-        // Role filtering
         if (roleLower === "all") {
           query = query.not("role", "is", null);
         } else if (roleLower === "nonresident") {
@@ -699,7 +694,6 @@ Deno.serve(
           console.log(`✅ Found ${socUsers.length} society users`);
 
           for (const su of socUsers) {
-            // Extract contact data - properly handle array or object
             const contactData = firstOrNull<MemberContact>(su.SSP_Contact);
             const blockData = firstOrNull<MemberBlock>(su.SSP_Block);
             const towerData = firstOrNull<MemberTower>(su.SSP_Tower);
@@ -732,7 +726,6 @@ Deno.serve(
                 userType: su.user_type || "NA",
                 vendorName: null,
                 vendorServiceType: null,
-                // ✅ Contact fields - properly extracted
                 fullName: contactData?.name || "NA",
                 phone: contactData?.phone || "NA",
                 email: contactData?.email || "NA",
@@ -750,6 +743,7 @@ Deno.serve(
                 vendorId: "NA",
                 vendorRating: "NA",
                 recordId: null,
+                createdAt: su.created_at || null,
               });
             }
           }
@@ -811,6 +805,7 @@ Deno.serve(
 
           for (const nsu of nonSocUsers) {
             allMembers.push({
+              parkingSlot: null,
               societyName: "NA",
               memberId: "NA",
               role: nsu.role || "NA",
@@ -848,6 +843,7 @@ Deno.serve(
               vendorId: nsu.vendor_id || "NA",
               vendorRating: nsu.vendor_rating || "NA",
               recordId: nsu.non_society_user_id,
+              createdAt: nsu.created_at || null,
             });
           }
         }
@@ -856,7 +852,16 @@ Deno.serve(
       console.log(`📊 Total members before filtering: ${allMembers.length}`);
 
       // ============================================
-      // STEP 5: Apply Filters (Client-side)
+      // STEP 5: Apply Sorting (Newest First)
+      // ============================================
+      allMembers.sort((a, b) => {
+        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return dateB - dateA; // Descending order
+      });
+
+      // ============================================
+      // STEP 6: Apply Filters (Client-side)
       // ============================================
       const filters = {
         role: roleInput,
@@ -870,7 +875,7 @@ Deno.serve(
       console.log(`📊 After filters: ${filteredMembers.length}`);
 
       // ============================================
-      // STEP 6: Apply Search (Client-side)
+      // STEP 7: Apply Search (Client-side)
       // ============================================
       if (search) {
         filteredMembers = applySearchFilter(filteredMembers, search);
@@ -878,7 +883,7 @@ Deno.serve(
       }
 
       // ============================================
-      // STEP 7: Apply Pagination
+      // STEP 8: Apply Pagination
       // ============================================
       const { items, total } = applyPagination(
         filteredMembers,
@@ -890,7 +895,7 @@ Deno.serve(
       );
 
       // ============================================
-      // STEP 8: Return Response with Pagination
+      // STEP 9: Return Response with Pagination
       // ============================================
       return successResponse({
         total: total,

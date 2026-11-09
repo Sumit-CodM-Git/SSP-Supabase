@@ -143,7 +143,7 @@ interface CrudTowerRequest {
     block?: string | null;
     active?: boolean;
     floors?: number;
-    flatsPerFloor?: number;
+    flats_per_floor?: number | string;
   };
 }
 
@@ -165,6 +165,7 @@ interface FormattedTower {
   active: boolean;
   floors: number;
   flatsPerFloor: number;
+  totalFlats: number;
   createdAt: string;
 }
 
@@ -249,6 +250,7 @@ function formatTower(row: TowerRow): FormattedTower {
     active: row.active,
     floors: row.floors ?? 0,
     flatsPerFloor: row.flats_per_floor ?? 0,
+    totalFlats: Number(row.floors ?? 0) * Number(row.flats_per_floor ?? 0),
     createdAt: row.created_at,
   };
 }
@@ -430,7 +432,7 @@ async function handleCreate(
 
   const blockId = p.block && String(p.block).trim() !== "" ? p.block : null;
   const floors = parseInteger(p.floors) ?? 0;
-  const flatsPerFloor = parseInteger(p.flatsPerFloor) ?? 0;
+  const flatsPerFloor = parseInteger(p.flats_per_floor) ?? 0;
 
   // DB payload uses snake_case
   const insertPayload = {
@@ -496,11 +498,11 @@ async function handleUpdate(
     }
     updatePayload.floors = floors;
   }
-  if (req.payload.flatsPerFloor !== undefined) {
-    const flats = parseInteger(req.payload.flatsPerFloor);
+  if (req.payload.flats_per_floor !== undefined) {
+    const flats = parseInteger(req.payload.flats_per_floor);
     if (flats === null) {
       return fail(
-        "flatsPerFloor must be a non-negative integer.",
+        "flats_per_floor must be a non-negative integer.",
         400,
         "INVALID_PARAMETERS",
       );

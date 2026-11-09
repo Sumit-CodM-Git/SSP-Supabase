@@ -1,4 +1,4 @@
-import { contactParkingSlot } from "../_shared/contact.ts";
+import { resolveReceiptImage } from "../_shared/receipt-storage.ts";
 /*import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -223,7 +223,6 @@ const corsHeaders = {
 }
 
 interface BookingData {
-  parkingSlot?: string | null;
   bookingId: string | null;
   recordType: "booking" | "request";
   requestId: string | null;
@@ -249,6 +248,7 @@ interface BookingData {
   amount: number | null;
   rejectionReason: string | null;
   receiptImageUrl: string | null;
+  receiptUploadStatus: "uploaded" | "missing" | "not_provided" | "unverified";
 }
 
 function normalizeBookingStatus(value: unknown): string {
@@ -370,7 +370,7 @@ serve(async (req: Request) => {
           SSP_Block!left (
             block_name
           ),
-          SSP_Contact!left (parking_slot,
+          SSP_Contact!left (
             name,
             phone
           ),
@@ -459,7 +459,7 @@ serve(async (req: Request) => {
     const bookingsList: BookingData[] = []
 
     if (records) {
-      for (const record of records) {
+      const mappedBookings = await Promise.all(records.map(async (record) => {
         const facilityObj = Array.isArray(record.booking_facility) ? record.booking_facility[0] : record.booking_facility
         const paymentObj = Array.isArray(record.SSP_Payment) ? record.SSP_Payment[0] : record.SSP_Payment
         const userObj = Array.isArray(record.booking_resident) ? record.booking_resident[0] : record.booking_resident
@@ -467,24 +467,17 @@ serve(async (req: Request) => {
         const blockObj = Array.isArray(userObj?.SSP_Block) ? userObj?.SSP_Block[0] : userObj?.SSP_Block
         const contactObj = Array.isArray(userObj?.SSP_Contact) ? userObj?.SSP_Contact[0] : userObj?.SSP_Contact
 
-        let screenshotUrl: string | null = null
         const docArray = paymentObj?.SSP_Document
-        const docObj = Array.isArray(docArray) ? docArray[0] : docArray
-        const rawPath = docObj?.s3_path || paymentObj?.receipt_url || null
-
-        if (rawPath && rawPath.trim() !== '') {
-          const cleanPath = rawPath.trim()
-          screenshotUrl = cleanPath.startsWith('http')
-            ? cleanPath
-            : `${supabaseUrl}/storage/v1/object/public/society-documents/${cleanPath}`
-        }
+        const documents = Array.isArray(docArray) ? docArray : docArray ? [docArray] : []
+        const receipt = await resolveReceiptImage(supabase, [
+          ...documents.map((doc: any) => doc.s3_path), paymentObj?.receipt_url
+        ])
 
         const resolvedPaymentStatus = paymentObj?.payment_status 
           || record.payment_status 
           || 'Unpaid'
 
-        bookingsList.push({
-          parkingSlot: contactParkingSlot(contactObj),
+        return {
           bookingId: record.name ?? 'NA',
           recordType: record.recordType,
           requestId: record.request_id ?? null,
@@ -509,9 +502,10 @@ serve(async (req: Request) => {
           paymentId: paymentObj?.pay_rec_id ?? null,
           paymentDate: paymentObj?.payment_date ?? null,
           amount: paymentObj?.amount != null ? Number(paymentObj.amount) : null,
-          receiptImageUrl: screenshotUrl
-        })
-      }
+          ...receipt
+        } as BookingData
+      }))
+      bookingsList.push(...mappedBookings)
     }
 
     const totalRecords = count ?? 0
