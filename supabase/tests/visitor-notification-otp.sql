@@ -21,9 +21,18 @@ BEGIN
   SELECT count(*) INTO v_count FROM public."SSP_Notification" WHERE reference_id=v_otp_first;
   IF v_count<>0 THEN RAISE EXCEPTION 'Unverified draft must not notify'; END IF;
   UPDATE public."SSP_Non_Society_User" SET is_otp_verified=true,visitor_status='Pending',visitor_approval_status='pending' WHERE non_society_user_id=v_otp_first;
-  SELECT count(*) INTO v_count FROM public."SSP_Notification" WHERE reference_id=v_otp_first AND recipient_type::text='Resident' AND message LIKE '%000000000021%';
-  IF v_count<>1 THEN RAISE EXCEPTION 'Verified phone must notify once without waiting for name, found %',v_count; END IF;
+  SELECT count(*) INTO v_count FROM public."SSP_Notification" WHERE reference_id=v_otp_first AND recipient_type::text='Resident';
+  IF v_count<>0 THEN RAISE EXCEPTION 'Unnamed verified visitor must wait for details'; END IF;
   UPDATE public."SSP_Non_Society_User" SET name='TEST_OTP_FIRST' WHERE non_society_user_id=v_otp_first;
+  SELECT count(*) INTO v_count FROM public."SSP_Notification"
+    WHERE reference_id=v_otp_first AND message='TEST_OTP_FIRST is waiting for your approval.'
+      AND action_data->>'visitorName'='TEST_OTP_FIRST' AND extra_data->>'visitorName'='TEST_OTP_FIRST';
+  IF v_count<>1 THEN RAISE EXCEPTION 'Named verified visitor must notify with its real name'; END IF;
+  UPDATE public."SSP_Non_Society_User" SET name='TEST_CORRECTED_NAME' WHERE non_society_user_id=v_otp_first;
+  SELECT count(*) INTO v_count FROM public."SSP_Notification"
+    WHERE reference_id=v_otp_first AND message='TEST_CORRECTED_NAME is waiting for your approval.'
+      AND action_data->>'visitorName'='TEST_CORRECTED_NAME' AND extra_data->>'visitorName'='TEST_CORRECTED_NAME';
+  IF v_count<>1 THEN RAISE EXCEPTION 'Existing notification must refresh when name changes'; END IF;
   UPDATE public."SSP_Non_Society_User" SET purpose='Changed details' WHERE non_society_user_id=v_otp_first;
   SELECT count(*) INTO v_count FROM public."SSP_Notification" WHERE reference_id=v_otp_first AND recipient_type::text='Resident';
   IF v_count<>1 THEN RAISE EXCEPTION 'Ordinary updates must not repeat notification'; END IF;

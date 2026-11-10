@@ -1,5 +1,5 @@
 import { visitorDateOtp } from "../_shared/visitor-otp-date.ts";
-import { findVisitorDraft, canVerifyVisitorOtp, findPendingVisitorForOtp, VisitorDraftError } from "../_shared/visitor-drafts.ts";
+import { hasVisitorName, readVisitorName, findVisitorDraft, canVerifyVisitorOtp, findPendingVisitorForOtp, VisitorDraftError } from "../_shared/visitor-drafts.ts";
 // // ============================================
 // // visitor-otp - Simple Visitor OTP Flow
 // // One reusable OTP draft per visit; completed visits remain separate records.
@@ -390,6 +390,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 
 interface VisitorOtpRequest {
   phoneNumber: string;
+  visitorName?: string;
+  name?: string;
   otp?: string;
   visitorId?: string;
   /** The resident (SSP_Society_User.user_id) the visitor is visiting. */
@@ -398,15 +400,19 @@ interface VisitorOtpRequest {
 
 interface VisitorOtpResponse {
   visitorId: string;
+  name: string | null;
+  visitorName: string | null;
   phoneNumber: string;
   message: string;
   otpVerified: boolean;
   isNewVisitor: boolean;
   nextStep: "VERIFY_OTP" | "COMPLETED";
+  requiresVisitorDetails?: boolean;
 }
 
 interface VisitorData {
   non_society_user_id: string;
+  name: string;
   phone_number: string;
   one_time_password: string | null;
   visitor_status: string | null;
@@ -602,6 +608,7 @@ async function resolveTargetResident(
 async function createNewVisitor(
   phoneNumber: string,
   target: TargetResident,
+  visitorName: string | null,
 ): Promise<{ visitor: VisitorData | null; error?: string }> {
   try {
     const visitorId = generateId();
@@ -609,7 +616,7 @@ async function createNewVisitor(
     const newVisitorData = {
       non_society_user_id: visitorId,
       phone_number: phoneNumber,
-      name: "Unknown Visitor",
+      name: visitorName ?? "Unknown Visitor",
       role: "visitor",
       visitor_status: "otp_pending",
       check_in: null,
@@ -705,6 +712,7 @@ Deno.serve(
         );
       }
 
+      const visitorName = readVisitorName(body);
       const cleanPhone = sanitizeString(phoneNumber);
       const cleanSocietyUserId = sanitizeString(societyUserId);
 
@@ -742,7 +750,7 @@ Deno.serve(
       if (draft && !canVerifyVisitorOtp(draft)) return errorResponse("This visitor has already been submitted. Start a new visit without visitorId.", 409);
       if (!draft && cleanOtp) return errorResponse("No active OTP request found. Request an OTP first.", 404);
       if (!draft) {
-        const created = await createNewVisitor(cleanPhone, target);
+        const created = await createNewVisitor(cleanPhone, target, visitorName);
         if (created.error) {
           // Another request may have reserved the same draft concurrently.
           draft = await findVisitorDraft(supabaseAdmin, target.userId, target.society, cleanPhone);
@@ -750,6 +758,19 @@ Deno.serve(
         } else draft = created.visitor;
       }
       if (!draft) return errorResponse("Failed to create visitor record.");
+      if (visitorName && draft.name !== visitorName) {
+        if (hasVisitorName(draft.name)) {
+          return errorResponse("Visitor name does not match this visit.", 409);
+        }
+        let nameUpdate = supabaseAdmin.from("SSP_Non_Society_User")
+          .update({ name: visitorName }).eq("non_society_user_id", draft.non_society_user_id)
+          .eq("hosted_by", target.userId).eq("society", target.society);
+        nameUpdate = draft.name == null ? nameUpdate.is("name", null) : nameUpdate.eq("name", draft.name);
+        const { data: savedVisitor, error: nameError } = await nameUpdate.select("*").maybeSingle();
+        if (nameError) return errorResponse(`Failed to save visitor name: ${nameError.message}`, 500);
+        if (!savedVisitor) return errorResponse("Visitor changed. Refresh and retry.", 409);
+        draft = savedVisitor;
+      }
       const visitorData = draft as VisitorData;
       if (!cleanOtp) {
         const { error: updateError } = await supabaseAdmin.from("SSP_Non_Society_User")
@@ -773,10 +794,13 @@ Deno.serve(
         return successResponse({
           visitorId: visitorData.non_society_user_id,
           phoneNumber: visitorData.phone_number,
+          name: hasVisitorName(visitorData.name) ? visitorData.name : null,
+          visitorName: hasVisitorName(visitorData.name) ? visitorData.name : null,
           message: `OTP has been sent. Please verify OTP.`,
           otpVerified: false,
           isNewVisitor: true,
           nextStep: "VERIFY_OTP",
+          requiresVisitorDetails: !hasVisitorName(visitorData.name),
         });
       }
 
@@ -812,7 +836,8 @@ Deno.serve(
         .update({
           one_time_password: null,
           is_otp_verified: true,
-          ...(visitorData.visitor_status === "otp_pending" ? {
+          // Unnamed OTP drafts wait for the details form before requesting resident approval.
+          ...(visitorData.visitor_status === "otp_pending" && hasVisitorName(visitorData.name) ? {
             visitor_status: "Pending", visitor_approval_status: "pending",
           } : {}),
         })
@@ -832,10 +857,13 @@ Deno.serve(
       const response: VisitorOtpResponse = {
         visitorId: visitorData.non_society_user_id,
         phoneNumber: visitorData.phone_number,
+        name: hasVisitorName(visitorData.name) ? visitorData.name : null,
+        visitorName: hasVisitorName(visitorData.name) ? visitorData.name : null,
         message: "OTP verified successfully.",
         otpVerified: true,
         isNewVisitor: true,
         nextStep: "COMPLETED",
+        requiresVisitorDetails: !hasVisitorName(visitorData.name),
       };
 
       // ============================================

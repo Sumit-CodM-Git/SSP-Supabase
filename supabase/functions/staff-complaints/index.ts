@@ -597,7 +597,7 @@ import { contactParkingSlot } from "../_shared/contact.ts";
 
 //         const { data: complaintCheck, error: checkErr } = await supabaseAdmin
 //           .from("SSP_Complaint")
-//           .select("complaint_id, assigned_agent, non_society_user")
+//           .select("complaint_id, assigned_agent, non_society_user, status")
 //           .eq("complaint_id", cleanComplaintId)
 //           .maybeSingle();
 
@@ -994,6 +994,7 @@ interface ComplaintResponse {
 }
 
 interface PaginatedResponse {
+  statusCounts: { assigned: number; inProgress: number; resolved: number };
   complaints: ComplaintResponse[];
   pagination: {
     total: number;
@@ -1584,7 +1585,7 @@ Deno.serve(
 
         const { data: complaintCheck, error: checkErr } = await supabaseAdmin
           .from("SSP_Complaint")
-          .select("complaint_id, assigned_agent, non_society_user")
+          .select("complaint_id, assigned_agent, non_society_user, status")
           .eq("complaint_id", cleanComplaintId)
           .maybeSingle();
 
@@ -1604,13 +1605,19 @@ Deno.serve(
           );
         }
 
-        const updatePayload: {
-          status: string;
-          completion_date_time: string | null;
-        } = {
+        const updatePayload: Record<string, unknown> = {
           status: cleanNewStatus,
           completion_date_time: null,
         };
+
+        if (cleanNewStatus.toLowerCase() !== String(complaintCheck.status).toLowerCase()) {
+          if (cleanNewStatus.toLowerCase() === "assigned") {
+            Object.assign(updatePayload, {start_otp: null, start_otp_generated_at: null, start_otp_verified_at: null});
+          }
+          if (["assigned", "in_progress"].includes(cleanNewStatus.toLowerCase())) {
+            Object.assign(updatePayload, {end_otp: null, end_otp_generated_at: null, end_otp_verified_at: null});
+          }
+        }
 
         if (cleanNewStatus.toLowerCase() === "resolved") {
           updatePayload.completion_date_time = getISTISOString();
@@ -1726,6 +1733,26 @@ Deno.serve(
       }
 
       const rawComplaints = (complaints || []) as unknown as RawComplaint[];
+
+      // Card totals cover every complaint assigned to this validated staff member.
+      // Do not derive these from the current page or the selected status tab.
+      const statusResults = await Promise.all(
+        ["assigned", "in_progress", "resolved"].map((complaintStatus) =>
+          supabaseAdmin
+            .from("SSP_Complaint")
+            .select("complaint_id", { count: "exact", head: true })
+            .eq(staffType === "SERVICE_AGENT" ? "assigned_agent" : "non_society_user", staffIdValue)
+            .eq("status", complaintStatus)
+        ),
+      );
+      if (statusResults.some((result) => result.error || result.count === null)) {
+        return errorResponse("Failed to fetch complaint status totals.");
+      }
+      const statusCounts = {
+        assigned: statusResults[0].count ?? 0,
+        inProgress: statusResults[1].count ?? 0,
+        resolved: statusResults[2].count ?? 0,
+      };
 
       // ------- BATCH: fetch all documents -------
       const complaintIds = rawComplaints.map((c) => c.complaint_id);
@@ -1874,6 +1901,7 @@ Deno.serve(
 
       // ------- Response -------
       const response: PaginatedResponse = {
+        statusCounts,
         complaints: items,
         pagination: {
           total,

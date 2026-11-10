@@ -1048,6 +1048,7 @@ interface ResidentLogVisitorsRequest {
 }
 
 interface VisitorLogResponse {
+  visitorName?: string;
   visitorId: string;
   name: string;
   phoneNumber: string;
@@ -1618,7 +1619,9 @@ Deno.serve(
           .select("non_society_user, s3_path")
           .in("non_society_user", visitorIds)
           .eq("society", society.society_id)
-          .not("s3_path", "is", null);
+          .not("s3_path", "is", null)
+          .in("document_type", ["visitor_image", "security_guard_image", "guest_image", "photo"])
+          .order("created_at", { ascending: false });
 
         for (const doc of (documents ?? []) as {
           non_society_user: string;
@@ -1659,6 +1662,7 @@ Deno.serve(
         formattedVisitors.push({
           visitorId: raw.non_society_user_id,
           name: raw.name || "N/A",
+          visitorName: raw.name || "N/A",
           phoneNumber: raw.phone_number || "N/A",
           role: raw.role || "visitor",
           visitorStatus: raw.visitor_status || null,

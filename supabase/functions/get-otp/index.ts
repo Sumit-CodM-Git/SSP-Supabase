@@ -203,7 +203,8 @@ Deno.serve(
           role,
           society:SSP_Society (registration_number),
           contact:SSP_Contact (parking_slot, phone)
-        `);
+        `)
+        .is("deleted_at", null);
 
       if (sError) {
         return createOTPErrorResponse("QUERY_ERROR", sError.message, 400);

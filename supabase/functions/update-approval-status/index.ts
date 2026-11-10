@@ -182,7 +182,9 @@ serve(
       const offset = (pageNum - 1) * limitNum;
 
       // Input Sanitization
-      const cleanAction = sanitizeString(actionType).toLowerCase();
+      const action = sanitizeString(actionType).trim().toLowerCase();
+      const cleanAction = ["accept", "accepted", "approve", "allow", "allowed"].includes(action)
+        ? "approved" : ["rejected", "deny", "denied"].includes(action) ? "reject" : action;
       const cleanRegNum = sanitizeString(societyRegistrationNumber);
       const cleanVisitorId = sanitizeString(visitorId);
 
@@ -383,6 +385,11 @@ serve(
         status: {
           result: responseFlag,
           updatedStatus: newStatus,
+          visitorId: visitor.non_society_user_id,
+          approvalStatus: newStatus.toLowerCase(),
+          visitorStatus: newStatus,
+          name: visitor.name ?? "",
+          visitorName: visitor.name ?? "",
         },
         visitors: normalizedVisitors,
         pagination: {

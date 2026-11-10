@@ -304,7 +304,8 @@ serve(async (req: Request) => {
     const { 
       societyRegistrationNumber, 
       status, 
-      facilityId, 
+      facilityId,
+      facilityName,
       startDate, 
       endDate,
       searchQuery,
@@ -316,6 +317,14 @@ serve(async (req: Request) => {
       return buildError('BAD_REQUEST', 'societyRegistrationNumber is mandatory.', 400, startTime)
     }
 
+    if (facilityName != null && typeof facilityName !== 'string') {
+      return buildError('BAD_REQUEST', 'facilityName must be text.', 400, startTime)
+    }
+    const cleanFacilityName = typeof facilityName === 'string' ? facilityName.trim() : ''
+    const hasFacilityName = cleanFacilityName !== ''
+    // Match literal names: SQL wildcard characters in a facility label are not filters.
+    const facilityNamePattern = cleanFacilityName.replace(/[\\%_]/g, '\\$&')
+
     const regNum = String(societyRegistrationNumber).trim()
     const pageNum = Math.max(1, Number(page) || 1)
     const limitNum = Math.min(100, Math.max(1, Number(limit) || 10))
@@ -326,7 +335,7 @@ serve(async (req: Request) => {
     // the resident/facility details selected for the response.
     const searchEmbeds = cleanSearch
       ? `, search_facility:SSP_Facility(),
-          search_resident:SSP_Society_User(SSP_Contact!inner())`
+          search_resident:SSP_Society_User!requested_by(SSP_Contact!inner())`
       : ''
 
     const bookingSelect = `
@@ -388,7 +397,11 @@ serve(async (req: Request) => {
         .select(select)
         .eq('booking_resident.SSP_Society.registration_number', regNum)
 
-      if (facilityId && String(facilityId).trim() !== '') {
+      if (hasFacilityName) {
+        if (cleanFacilityName.toLowerCase() !== 'all') {
+          query = query.ilike('booking_facility.name', facilityNamePattern)
+        }
+      } else if (facilityId && String(facilityId).trim() !== '') {
         query = query.eq('booking_facility.id', String(facilityId).trim())
       }
 

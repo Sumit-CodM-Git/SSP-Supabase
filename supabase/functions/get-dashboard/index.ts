@@ -12,6 +12,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 // TYPES
 // ============================================
 interface Contact {
+    parking_slot?: string | null;
     contact_id: string;
     name: string;
     phone: string;
@@ -79,7 +80,7 @@ interface FormattedAlert {
 
 interface DashboardResponse {
     user: {
-    parkingSlot?: string | null;
+        parkingSlot: string | null;
         id: string;
         name: string;
         phone: string;

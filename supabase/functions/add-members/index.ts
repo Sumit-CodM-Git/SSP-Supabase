@@ -1065,6 +1065,12 @@ function validateMemberData(
 ): string | null {
   for (let i = 0; i < memberData.length; i++) {
     const m = memberData[i];
+    try {
+      normalizeParkingSlot(m.parkingSlot !== undefined ? m.parkingSlot : m.parking_slot);
+    } catch {
+      return `Member [index ${i}]: parkingSlot must be text or null.`;
+    }
+
 
     if (
       !m.fullName || typeof m.fullName !== "string" || m.fullName.trim() === ""
@@ -1679,6 +1685,7 @@ Deno.serve(
               .eq("block", data.blockId)
               .eq("tower", data.towerId)
               .eq("unit_flat_number", String(data.unitFlatNumber).trim())
+              .is("deleted_at", null)
               .is("move_out_date", null)
               .limit(1);
 

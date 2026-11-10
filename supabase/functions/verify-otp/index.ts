@@ -238,7 +238,8 @@ Deno.serve(
                         society_name,
                         registration_number
                     )
-                `);
+                `)
+        .is("deleted_at", null);
 
       if (userError) {
         console.error("❌ User fetch error:", userError);

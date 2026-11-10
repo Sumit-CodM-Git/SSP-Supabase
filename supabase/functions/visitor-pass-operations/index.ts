@@ -1,4 +1,4 @@
-import { findVisitorDraft, isVisitorOtpDraft, canCompleteVisitorDetails, VisitorDraftError } from "../_shared/visitor-drafts.ts";
+import { hasVisitorName, readVisitorName, findVisitorDraft, isVisitorOtpDraft, canCompleteVisitorDetails, VisitorDraftError } from "../_shared/visitor-drafts.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireAuth, AuthContext } from "../_shared/auth.ts";
@@ -85,6 +85,7 @@ interface UnifiedSecurityPayload {
   tower?: string;
   newStatus?: string;
   visitorName?: string;
+  name?: string;
   phone?: string;
   phoneNumber?: string;
   email?: string;
@@ -454,7 +455,12 @@ Deno.serve(
 
           const phone = nullIfBlank(requestObj.phone) ?? nullIfBlank(requestObj.phoneNumber);
           const draft = await findVisitorDraft(supabaseAdmin, hostedByUuid, societyId, phone, visitorId?.trim());
-          const visitorName = nullIfBlank(requestObj.visitorName);
+          const suppliedName = readVisitorName(requestObj as unknown as Record<string, unknown>);
+          const savedName = hasVisitorName(draft?.name) ? draft.name : null;
+          if (savedName && suppliedName && suppliedName !== savedName) {
+            return errorResponse("Visitor name does not match this visit.", 409);
+          }
+          const visitorName = suppliedName ?? savedName;
           const visitorPhone = phone ?? draft?.phone_number;
           if (!visitorName || !visitorPhone) return errorResponse("visitorName and phone/phoneNumber (or an OTP visitorId) are required.", 400);
           const reusable = draft && (isVisitorOtpDraft(draft) || canCompleteVisitorDetails(draft));
@@ -490,7 +496,7 @@ Deno.serve(
           const visitorWrite = submitted
             ? visitorTable.select("*").eq("non_society_user_id", draft.non_society_user_id)
             : reusable
-            ? visitorTable.update(visitorPayload).eq("non_society_user_id", draft.non_society_user_id).eq("hosted_by", hostedByUuid).eq("society", societyId).eq("name", "Unknown Visitor").eq("visitor_status", draft.visitor_status)
+            ? visitorTable.update(visitorPayload).eq("non_society_user_id", draft.non_society_user_id).eq("hosted_by", hostedByUuid).eq("society", societyId).eq("name", draft.name).eq("visitor_status", draft.visitor_status)
             : visitorTable.insert(visitorPayload);
           const { data: newVisitor, error: insertErr } = await visitorWrite
             .select(
@@ -569,7 +575,7 @@ Deno.serve(
 
           const { data: checkVisitor } = await supabaseAdmin
             .from("SSP_Non_Society_User")
-            .select("non_society_user_id")
+            .select("non_society_user_id, name")
             .eq("non_society_user_id", visitorId)
             .eq("society", societyId)
             .maybeSingle();
@@ -578,6 +584,13 @@ Deno.serve(
             return errorResponse(`No visitor found with ID: ${visitorId}`, 404);
 
           const updatePayload: Record<string, unknown> = {};
+        const suppliedVisitorName = readVisitorName(requestObj as unknown as Record<string, unknown>);
+        if (suppliedVisitorName) {
+          if (hasVisitorName(checkVisitor.name) && checkVisitor.name !== suppliedVisitorName) {
+            return errorResponse("Visitor name does not match this visit.", 409);
+          }
+          updatePayload.name = suppliedVisitorName;
+        }
           const targetStatus = String(requestObj.newStatus).trim().toLowerCase();
 
           if (targetStatus === "inside") {
@@ -587,11 +600,13 @@ Deno.serve(
           } else if (targetStatus === "outside") {
             updatePayload.check_out = new Date().toISOString();
             updatePayload.visitor_status = "Outside";
-          } else if (targetStatus === "approved") {
+          } else if (["approved", "approve", "accept", "accepted", "allow"].includes(targetStatus)) {
             updatePayload.visitor_status = "Approved";
+            updatePayload.visitor_approval_status = "approved";
             updatePayload.pre_approved = true;
-          } else if (targetStatus === "rejected") {
+          } else if (["rejected", "reject", "deny"].includes(targetStatus)) {
             updatePayload.visitor_status = "Rejected";
+            updatePayload.visitor_approval_status = "rejected";
             updatePayload.pre_approved = false;
           } else {
             return errorResponse(
@@ -1170,7 +1185,7 @@ Deno.serve(
                 file_size: requestObj.fileSize
                   ? parseFloat(String(requestObj.fileSize))
                   : bytes.byteLength,
-                document_type: "Security Guard Image",
+                document_type: "security_guard_image",
                 s3_path: urlInfo.publicUrl,
                 society: society.society_id,
                 non_society_user: nonSocietyUser.non_society_user_id,
@@ -1316,7 +1331,7 @@ Deno.serve(
               file_size: requestObj.fileSize
                 ? parseFloat(String(requestObj.fileSize))
                 : null,
-              document_type: "Security Guard Image",
+              document_type: "security_guard_image",
               s3_path: urlInfo.publicUrl,
               society: society.society_id,
               non_society_user: nonSocietyUser.non_society_user_id,
@@ -1404,7 +1419,7 @@ Deno.serve(
             `,
               { count: "exact" }
             )
-            .eq("document_type", "Security Guard Image");
+            .eq("document_type", "security_guard_image");
 
           if (visitorId && visitorId.trim() !== "") {
             query = query.eq("non_society_user", visitorId.trim());
@@ -1506,12 +1521,14 @@ async function attachSignedURLsToVisitors(
   const { data: docs } = await supabase
     .from("SSP_Document")
     .select("non_society_user, s3_path")
-    .in("non_society_user", visitorIds);
+    .in("non_society_user", visitorIds)
+    .in("document_type", ["visitor_image", "security_guard_image", "guest_image", "photo"])
+    .order("created_at", { ascending: false });
 
   const imageMap = new Map<string, string>();
 
   (docs as DocumentRow[] | null)?.forEach((doc) => {
-    if (doc.non_society_user && doc.s3_path) {
+    if (doc.non_society_user && doc.s3_path && !imageMap.has(doc.non_society_user)) {
       imageMap.set(doc.non_society_user, doc.s3_path.trim());
     }
   });
@@ -1536,6 +1553,7 @@ async function attachSignedURLsToVisitors(
         parkingSlot: contactParkingSlot(v.hosted_by?.contact),
         visitorId: v.non_society_user_id,
         name: v.name ?? "",
+        visitorName: v.name ?? "",
         phone: v.phone_number ?? "",
         platform: v.delivery_origin ?? "N/A",
         purpose: v.purpose ?? "N/A",

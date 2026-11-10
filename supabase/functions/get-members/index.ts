@@ -667,7 +667,8 @@ Deno.serve(
                             id_proof_number
                         )
                     `)
-          .eq("society", socId);
+          .eq("society", socId)
+          .is("deleted_at", null);
 
         if (flat) query = query.eq("unit_flat_number", String(flat).trim());
         if (resolvedBlockId) query = query.eq("block", resolvedBlockId);

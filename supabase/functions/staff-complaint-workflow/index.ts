@@ -1,3 +1,4 @@
+import { runComplaintOtpCycle } from "../_shared/complaint-otp-cycle.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 // deno-lint-ignore-file no-import-prefix no-explicit-any
 // ============================================
@@ -846,369 +847,46 @@ function isValidOtpFormat(otp: string): boolean {
 // HANDLER — START_OTP
 // ============================================
 
-async function handleStartOtp(
-    req: Request,
-    ctx: StaffContext,
-    body: StaffComplaintWorkflowRequest,
-): Promise<Response> {
+async function handleStartOtp(req: Request, ctx: StaffContext, body: StaffComplaintWorkflowRequest): Promise<Response> {
     const complaintId = cleanText(body.complaintId, 50);
-    if (!complaintId) {
-        return buildError(req, "BAD_REQUEST", "complaintId is mandatory.", 400);
-    }
+    if (!complaintId) return buildError(req, "BAD_REQUEST", "complaintId is mandatory.", 400);
 
     const auth = await fetchAssignedComplaint(complaintId, ctx);
-    if (!auth.ok) {
-        return buildError(req, auth.code, auth.message, auth.status);
-    }
-
-    const c = auth.complaint;
-
-    // ✅ FIX: Removed strict "status === 'assigned'" check. 
-    // Only block if the complaint is already closed/resolved.
-    const currentStatus = String(c.status).toLowerCase();
-    if (["resolved", "cancelled", "rejected", "completed"].includes(currentStatus)) {
-        return buildError(
-            req,
-            "BAD_REQUEST",
-            `Cannot start work on a complaint with status '${c.status}'.`,
-            400,
-        );
-    }
-
-    const otp = generateOtp();
-    const now = new Date().toISOString();
-
-    const { data: savedOtp, error: upErr } = await supabaseAdmin
-        .from("SSP_Complaint")
-        .update({
-            start_otp: otp,
-            start_otp_generated_at: now,
-            start_otp_verified_at: null,
-        })
-        .eq("complaint_id", complaintId)
-        .is("deleted_at", null)
-        .select("complaint_id")
-        .maybeSingle();
-
-    if (upErr || !savedOtp) {
-        return buildError(req, "SERVER_ERROR", "Failed to store OTP.", 500);
-    }
-
-    return buildSuccess(req, {
-        complaintId,
-        stage: "START",
-        message:
-            `START OTP has been generated. The resident can retrieve it using FETCH_OTP. It is valid for ${OTP_TTL_MINUTES} minutes. Ask the resident to share it with you, then verify it.`,
-        otpVerified: false,
-        nextStep: "VERIFY_START",
-    });
+    if (!auth.ok) return buildError(req, auth.code, auth.message, auth.status);
+    const result = await runComplaintOtpCycle(supabaseAdmin, auth.complaint, "START", undefined, generateOtp());
+    return result.data ? buildSuccess(req, result.data) : buildError(req, result.status === 409 ? "CONFLICT" : "OTP_ERROR", result.message!, result.status);
 }
 
-// ============================================
-// HANDLER — VERIFY_START
-// ============================================
-
-async function handleVerifyStart(
-    req: Request,
-    ctx: StaffContext,
-    body: StaffComplaintWorkflowRequest,
-): Promise<Response> {
+async function handleVerifyStart(req: Request, ctx: StaffContext, body: StaffComplaintWorkflowRequest): Promise<Response> {
     const complaintId = cleanText(body.complaintId, 50);
-    const otp = cleanText(body.otp, 10);
+    if (!complaintId) return buildError(req, "BAD_REQUEST", "complaintId is mandatory.", 400);
+    const otp = cleanText(body.otp, 10); if (!otp) return buildError(req, "BAD_REQUEST", "otp is mandatory.", 400);
+    const auth = await fetchAssignedComplaint(complaintId, ctx);
+    if (!auth.ok) return buildError(req, auth.code, auth.message, auth.status);
+    const result = await runComplaintOtpCycle(supabaseAdmin, auth.complaint, "START", otp, generateOtp());
+    return result.data ? buildSuccess(req, result.data) : buildError(req, result.status === 409 ? "CONFLICT" : "OTP_ERROR", result.message!, result.status);
+}
 
-    if (!complaintId) {
-        return buildError(req, "BAD_REQUEST", "complaintId is mandatory.", 400);
-    }
-    if (!otp) {
-        return buildError(req, "BAD_REQUEST", "otp is mandatory.", 400);
-    }
-    if (!isValidOtpFormat(otp)) {
-        return buildError(
-            req,
-            "BAD_REQUEST",
-            "OTP must be a 6-digit number.",
-            400,
-        );
-    }
+async function handleEndOtp(req: Request, ctx: StaffContext, body: StaffComplaintWorkflowRequest): Promise<Response> {
+    const complaintId = cleanText(body.complaintId, 50);
+    if (!complaintId) return buildError(req, "BAD_REQUEST", "complaintId is mandatory.", 400);
 
     const auth = await fetchAssignedComplaint(complaintId, ctx);
-    if (!auth.ok) {
-        return buildError(req, auth.code, auth.message, auth.status);
-    }
-
-    const c = auth.complaint;
-
-    // ✅ FIX: Removed strict "status === 'assigned'" check.
-    const currentStatus = String(c.status).toLowerCase();
-    if (["resolved", "cancelled", "rejected", "completed"].includes(currentStatus)) {
-        return buildError(
-            req,
-            "BAD_REQUEST",
-            `Cannot verify START OTP for a complaint with status '${c.status}'.`,
-            400,
-        );
-    }
-
-    if (!c.start_otp) {
-        return buildError(req, "BAD_REQUEST", "Request START OTP first.", 400);
-    }
-    if (c.start_otp_verified_at) {
-        return buildError(
-            req,
-            "BAD_REQUEST",
-            "START OTP already verified.",
-            400,
-        );
-    }
-    if (isOtpExpired(c.start_otp_generated_at)) {
-        return buildError(
-            req,
-            "BAD_REQUEST",
-            "START OTP has expired. Request a new one.",
-            400,
-        );
-    }
-    if (String(c.start_otp).trim() !== otp.trim()) {
-        return buildError(
-            req,
-            "BAD_REQUEST",
-            "Invalid OTP. Please try again.",
-            400,
-        );
-    }
-
-    const now = getCurrentTimestamp();
-
-    // ✅ FIX: Removed .eq("status", "assigned") from the update query
-    const { data: updated, error: upErr } = await supabaseAdmin
-        .from("SSP_Complaint")
-        .update({
-            status: "in_progress",
-            start_otp_verified_at: now,
-        })
-        .eq("complaint_id", complaintId)
-        .is("start_otp_verified_at", null)
-        .select("complaint_id, status")
-        .maybeSingle();
-
-    if (upErr) {
-        return buildError(
-            req,
-            "SERVER_ERROR",
-            "Failed to update complaint.",
-            500,
-        );
-    }
-    if (!updated) {
-        return buildError(
-            req,
-            "CONFLICT",
-            "OTP already verified or state changed. Please refresh.",
-            409,
-        );
-    }
-
-    return buildSuccess(req, {
-        complaintId,
-        stage: "START",
-        message: "Work started successfully.",
-        otpVerified: true,
-        status: "in_progress",
-        nextStep: "END_OTP",
-    });
+    if (!auth.ok) return buildError(req, auth.code, auth.message, auth.status);
+    const result = await runComplaintOtpCycle(supabaseAdmin, auth.complaint, "END", undefined, generateOtp());
+    return result.data ? buildSuccess(req, result.data) : buildError(req, result.status === 409 ? "CONFLICT" : "OTP_ERROR", result.message!, result.status);
 }
 
-// ============================================
-// HANDLER — END_OTP
-// ============================================
-
-async function handleEndOtp(
-    req: Request,
-    ctx: StaffContext,
-    body: StaffComplaintWorkflowRequest,
-): Promise<Response> {
+async function handleVerifyEnd(req: Request, ctx: StaffContext, body: StaffComplaintWorkflowRequest): Promise<Response> {
     const complaintId = cleanText(body.complaintId, 50);
-    if (!complaintId) {
-        return buildError(req, "BAD_REQUEST", "complaintId is mandatory.", 400);
-    }
-
+    if (!complaintId) return buildError(req, "BAD_REQUEST", "complaintId is mandatory.", 400);
+    const otp = cleanText(body.otp, 10); if (!otp) return buildError(req, "BAD_REQUEST", "otp is mandatory.", 400);
     const auth = await fetchAssignedComplaint(complaintId, ctx);
-    if (!auth.ok) {
-        return buildError(req, auth.code, auth.message, auth.status);
-    }
-
-    const c = auth.complaint;
-
-    // ✅ FIX: Removed strict "status === 'in_progress'" check.
-    const currentStatus = String(c.status).toLowerCase();
-    if (["resolved", "cancelled", "rejected", "completed"].includes(currentStatus)) {
-        return buildError(
-            req,
-            "BAD_REQUEST",
-            `Cannot generate END OTP for a complaint with status '${c.status}'.`,
-            400,
-        );
-    }
-
-    if (c.end_otp_verified_at) {
-        return buildError(
-            req,
-            "BAD_REQUEST",
-            "END OTP already verified.",
-            400,
-        );
-    }
-    if (
-        c.end_otp === generateOtp() && c.end_otp_generated_at &&
-        !isOtpExpired(c.end_otp_generated_at)
-    ) {
-        return buildError(
-            req,
-            "CONFLICT",
-            "END OTP already generated. Wait for it to expire (10 minutes) or use the existing OTP.",
-            409,
-        );
-    }
-
-    const otp = generateOtp();
-    const now = new Date().toISOString();
-
-    const { data: savedOtp, error: upErr } = await supabaseAdmin
-        .from("SSP_Complaint")
-        .update({
-            end_otp: otp,
-            end_otp_generated_at: now,
-        })
-        .eq("complaint_id", complaintId)
-        .is("deleted_at", null)
-        .select("complaint_id")
-        .maybeSingle();
-
-    if (upErr || !savedOtp) {
-        return buildError(req, "SERVER_ERROR", "Failed to store OTP.", 500);
-    }
-
-    return buildSuccess(req, {
-        complaintId,
-        stage: "END",
-        message:
-            `END OTP has been generated. The resident can retrieve it using FETCH_OTP. It is valid for ${OTP_TTL_MINUTES} minutes. Ask the resident to share it with you, then verify it.`,
-        otpVerified: false,
-        nextStep: "VERIFY_END",
-    });
+    if (!auth.ok) return buildError(req, auth.code, auth.message, auth.status);
+    const result = await runComplaintOtpCycle(supabaseAdmin, auth.complaint, "END", otp, generateOtp());
+    return result.data ? buildSuccess(req, result.data) : buildError(req, result.status === 409 ? "CONFLICT" : "OTP_ERROR", result.message!, result.status);
 }
 
-// ============================================
-// HANDLER — VERIFY_END
-// ============================================
-
-async function handleVerifyEnd(
-    req: Request,
-    ctx: StaffContext,
-    body: StaffComplaintWorkflowRequest,
-): Promise<Response> {
-    const complaintId = cleanText(body.complaintId, 50);
-    const otp = cleanText(body.otp, 10);
-
-    if (!complaintId) {
-        return buildError(req, "BAD_REQUEST", "complaintId is mandatory.", 400);
-    }
-    if (!otp) {
-        return buildError(req, "BAD_REQUEST", "otp is mandatory.", 400);
-    }
-    if (!isValidOtpFormat(otp)) {
-        return buildError(
-            req,
-            "BAD_REQUEST",
-            "OTP must be a 6-digit number.",
-            400,
-        );
-    }
-
-    const auth = await fetchAssignedComplaint(complaintId, ctx);
-    if (!auth.ok) {
-        return buildError(req, auth.code, auth.message, auth.status);
-    }
-
-    const c = auth.complaint;
-
-    // ✅ FIX: Removed strict "status === 'in_progress'" check.
-    const currentStatus = String(c.status).toLowerCase();
-    if (["resolved", "cancelled", "rejected", "completed"].includes(currentStatus)) {
-        return buildError(
-            req,
-            "BAD_REQUEST",
-            `Cannot verify END OTP for a complaint with status '${c.status}'.`,
-            400,
-        );
-    }
-
-    if (!c.end_otp) {
-        return buildError(req, "BAD_REQUEST", "Request END OTP first.", 400);
-    }
-    if (c.end_otp_verified_at) {
-        return buildError(req, "BAD_REQUEST", "END OTP already verified.", 400);
-    }
-    if (isOtpExpired(c.end_otp_generated_at)) {
-        return buildError(
-            req,
-            "BAD_REQUEST",
-            "END OTP has expired. Request a new one.",
-            400,
-        );
-    }
-    if (String(c.end_otp).trim() !== otp.trim()) {
-        return buildError(
-            req,
-            "BAD_REQUEST",
-            "Invalid OTP. Please try again.",
-            400,
-        );
-    }
-
-    const now = getCurrentTimestamp();
-
-    // ✅ FIX: Removed .eq("status", "in_progress") from the update query
-    const { data: updated, error: upErr } = await supabaseAdmin
-        .from("SSP_Complaint")
-        .update({
-            status: "resolved",
-            end_otp_verified_at: now,
-            completion_date_time: now,
-        })
-        .eq("complaint_id", complaintId)
-        .is("end_otp_verified_at", null)
-        .select("complaint_id, status")
-        .maybeSingle();
-
-    if (upErr) {
-        return buildError(
-            req,
-            "SERVER_ERROR",
-            "Failed to update complaint.",
-            500,
-        );
-    }
-    if (!updated) {
-        return buildError(
-            req,
-            "CONFLICT",
-            "OTP already verified or state changed. Please refresh.",
-            409,
-        );
-    }
-
-    return buildSuccess(req, {
-        complaintId,
-        stage: "END",
-        message: "Work completed successfully.",
-        otpVerified: true,
-        status: "resolved",
-        nextStep: "COMPLETED",
-    });
-}
-
-// Only the resident who raised the complaint may retrieve its OTP.
 async function handleFetchOtp(
     req: Request,
     residentId: string,

@@ -937,6 +937,7 @@ interface MyVisitorsRequest {
 }
 
 interface VisitorResponse {
+  visitorName?: string;
   visitorId: string;
   name: string;
   phoneNumber: string;
@@ -1250,6 +1251,7 @@ function normalizeVisitorData(
   return {
     visitorId: rawVisitor.non_society_user_id,
     name: rawVisitor.name || "N/A",
+    visitorName: rawVisitor.name || "N/A",
     phoneNumber: rawVisitor.phone_number || "N/A",
     email: rawVisitor.email || null,
     gender: rawVisitor.gender || null,
@@ -1511,7 +1513,9 @@ Deno.serve(
           .select("non_society_user, s3_path")
           .in("non_society_user", visitorIds)
           .eq("society", society.society_id)
-          .not("s3_path", "is", null);
+          .not("s3_path", "is", null)
+          .in("document_type", ["visitor_image", "security_guard_image", "guest_image", "photo"])
+          .order("created_at", { ascending: false });
 
         for (const doc of (documents ?? []) as {
           non_society_user: string;

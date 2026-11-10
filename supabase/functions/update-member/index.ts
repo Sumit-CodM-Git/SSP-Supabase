@@ -225,6 +225,7 @@ Deno.serve(
         .from("SSP_Society_User")
         .select("user_id, contact, society")
         .eq("user_id", targetId)
+        .is("deleted_at", null)
         .maybeSingle();
 
       if (fetchErr) {
@@ -918,8 +919,21 @@ Deno.serve(
         updatedData.userOwnershipType = String(swapResult.ownershipType);
       }
 
+      let requestedParkingSlot: string | null | undefined;
+      let savedParkingSlot: string | null | undefined;
+
       // ── 3. Early validation of enum-like fields (fail fast, no DB hit) ──
       try {
+        try {
+          requestedParkingSlot = normalizeParkingSlot(
+            updatedData.parkingSlot !== undefined ? updatedData.parkingSlot : updatedData.parking_slot,
+          );
+        } catch {
+          throw new ValidationError("parkingSlot must be text or null.", "parkingSlot");
+        }
+        if (requestedParkingSlot !== undefined && !memberRecord.contact) {
+          throw new ValidationError("Member has no linked contact to save parkingSlot.", "parkingSlot");
+        }
         if (updatedData.userType !== undefined) {
           normalizeEnum(updatedData.userType, ALLOWED_USER_TYPES, "userType");
         }
@@ -1118,8 +1132,7 @@ Deno.serve(
       let finalName = "";
       if (memberRecord.contact) {
         const contactUpdatePayload: Record<string, unknown> = {};
-        const parkingSlot = normalizeParkingSlot(updatedData.parkingSlot !== undefined ? updatedData.parkingSlot : updatedData.parking_slot);
-        if (parkingSlot !== undefined) contactUpdatePayload.parking_slot = parkingSlot;
+        if (requestedParkingSlot !== undefined) contactUpdatePayload.parking_slot = requestedParkingSlot;
 
         const contactFieldMappings: [keyof UpdateMemberRequest["updatedData"], string][] = [
           ["fullName", "name"],
@@ -1146,7 +1159,7 @@ Deno.serve(
             .from("SSP_Contact")
             .update(contactUpdatePayload)
             .eq("contact_id", memberRecord.contact)
-            .select("name, email, phone")
+            .select("name, email, phone, parking_slot")
             .single();
 
           if (contactUpdateErr) {
@@ -1163,6 +1176,10 @@ Deno.serve(
             throw contactUpdateErr;
           }
           
+          if (!updatedContact) throw new Error("Contact update returned no saved record.");
+          if (requestedParkingSlot !== undefined) {
+            savedParkingSlot = updatedContact.parking_slot ?? null;
+          }
           if (updatedContact) {
             finalEmail = updatedContact.email || `${updatedContact.phone}@temp.user`;
             finalName = updatedContact.name || "User";
@@ -1210,9 +1227,9 @@ Deno.serve(
           memberId: targetId,
           updatedData: {
             ...updatedData,
-            ...((updatedData.parkingSlot !== undefined || updatedData.parking_slot !== undefined)
-              ? { parkingSlot: normalizeParkingSlot(updatedData.parkingSlot !== undefined ? updatedData.parkingSlot : updatedData.parking_slot) }
-              : {}),
+            ...(savedParkingSlot !== undefined ? { parkingSlot: savedParkingSlot } : {}),
+            ...(updatedData.parking_slot !== undefined && savedParkingSlot !== undefined
+              ? { parking_slot: savedParkingSlot } : {}),
           },
           status: "Successfully Updated",
         },

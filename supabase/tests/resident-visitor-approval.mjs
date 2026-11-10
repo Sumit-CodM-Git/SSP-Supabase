@@ -31,7 +31,7 @@ async function run(action,caller='host',options={}) {
  const response=await handler(new Request('https://test.example',{method:'POST',body:JSON.stringify({actionType:action,societyRegistrationNumber:'GZB-1234-ab',visitorId:'visitor'})}),{user:{id:caller}});
  return {status:response.status,body:await response.json(),update};
 }
-for(const [action,approval,status] of [['Approved','approved','Approved'],['Reject','rejected','Rejected']]) {
+for(const [action,approval,status] of [['Approved','approved','Approved'],['Accept','approved','Approved'],['Approve','approved','Approved'],['Reject','rejected','Rejected'],['Rejected','rejected','Rejected']]) {
  const allowed=await run(action);assert.equal(allowed.status,200);assert.equal(allowed.update.visitor_approval_status,approval);assert.equal(allowed.update.visitor_status,status);
  const other=await run(action,'other');assert.equal(other.status,403);assert.equal(other.update,undefined);
  const inside=await run(action,'host',{status:'Inside'});assert.equal(inside.status,409);assert.equal(inside.update,undefined);

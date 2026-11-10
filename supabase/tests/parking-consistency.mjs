@@ -1,6 +1,7 @@
 // Run: node supabase/tests/parking-consistency.mjs
 import assert from 'node:assert/strict';import{readFileSync}from'node:fs';import{stripTypeScriptTypes}from'node:module';
 import{parkingCounts}from'../functions/_shared/parking-counts.ts';
+import{contactParkingSlot}from'../functions/_shared/contact.ts';
 assert.deepEqual(parkingCounts({parking_slot:'152',covered_parking:75}),{totalParking:152,occupiedParking:75,vacantParking:77});
 assert.deepEqual(parkingCounts({parking_slot:'152',covered_parking:0}),{totalParking:152,occupiedParking:0,vacantParking:152});
 assert.equal(parkingCounts({parking_slot:152,covered_parking:152}).vacantParking,0);
@@ -11,7 +12,7 @@ function query(data){return{select(){return this},eq(){return this},in(){return 
 const client={from:table=>query(table==='SSP_Society_User'?users:table==='SSP_Contact'?contacts:[])};
 const source=stripTypeScriptTypes(readFileSync(new URL('../functions/get-dashboard/index.ts',import.meta.url),'utf8').replace(/^import\s[\s\S]*?from\s+["'][^"']+["'];?\s*$/gm,''));
 const build=new Function('Deno','createClient','requireAuth','corsHeaders','parkingCounts','contactParkingSlot',source+'\nreturn buildDashboardResponse;')
- ({env:{get:()=>''},serve(){}},()=>client,fn=>fn,{},parkingCounts,()=>null);
+ ({env:{get:()=>''},serve(){}},()=>client,fn=>fn,{},parkingCounts,contactParkingSlot);
 const society={society_id:'society',parking_slot:'152',covered_parking:75,total_unit:5003};
 const response=await build({user_id:'resident',role:['resident'],society,contact:null,tower:null,block:null},[],false);
 assert.equal(response.status,200);
@@ -26,3 +27,14 @@ const compute=new Function('supabase','societyId','societyRecord','unwrapOne','p
 const switched=await compute(switchClient,'society',society,value=>Array.isArray(value)?value[0]:value,parkingCounts);
 assert.equal(switched.vacantParkingSlots,77);assert.equal(switched.twoWheelers,19);assert.equal(switched.fourWheelers,16);
 console.log('Parking consistency tests passed: 152 total, 75 occupied, 77 vacant; registered vehicle counts remain 19 and 16 in dashboard and role-switch responses.');
+
+const dashboardUser={user_id:'41526542-03fa-42e3-b63a-62a4947496f6',role:['resident'],society,contact:{parking_slot:'DEMO-P-00009',name:'Parking testing'},tower:null,block:null};
+let parkingResponse=await build(dashboardUser,[],false);
+assert.equal((await parkingResponse.json()).data.user.parkingSlot,'DEMO-P-00009');
+dashboardUser.contact.parking_slot='P-UPDATED';
+parkingResponse=await build(dashboardUser,[],false);
+assert.equal((await parkingResponse.json()).data.user.parkingSlot,'P-UPDATED');
+dashboardUser.contact.parking_slot=null;
+parkingResponse=await build(dashboardUser,[],false);
+assert.equal((await parkingResponse.json()).data.user.parkingSlot,null);
+console.log('Dashboard returns the current contact parking slot, including changed and cleared values.');

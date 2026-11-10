@@ -1,3 +1,4 @@
+import { loadSocietyConfiguration, formatSocietyConfiguration, societyConfigurationVersion } from "../_shared/society-configuration.ts";
 import { parkingCounts } from "../_shared/parking-counts.ts";
 // deno-lint-ignore-file no-import-prefix
 // ============================================
@@ -43,6 +44,7 @@ interface SocietyRow {
 }
 
 interface TowerRow {
+    block: string | null;
     tower_id: string;
     created_at: string;
     active: boolean;
@@ -129,7 +131,7 @@ function successResponse(data: unknown): Response {
         JSON.stringify({ status: "SUCCESS", data }),
         {
             status: 200,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "private, no-cache, must-revalidate" },
         },
     );
 }
@@ -168,6 +170,8 @@ function formatAddress(s: SocietyRow): string | null {
 function formatTower(row: TowerRow) {
     return {
         towerId: row.tower_id,
+        block: row.block ?? null,
+        blockId: row.block ?? null,
         name: row.name,
         society: row.society,
         active: row.active,
@@ -389,26 +393,8 @@ serve(async (req: Request) => {
         const { societyId, society } = auth;
 
         // ── Parallel fetch ──
-        const [towersRes, blocksRes, facilitiesRes, staffRes, flatTypesRes] =
-            await Promise.all([
-                supabase
-                    .from("SSP_Tower")
-                    .select(
-                        "tower_id,created_at,active,society,name,floors,flats_per_floor",
-                    )
-                    .eq("society", societyId)
-                    .eq("active", true)
-                    .order("name", { ascending: true }),
-
-                supabase
-                    .from("SSP_Block")
-                    .select(
-                        "block_id,created_at,active,society,tower,block_name",
-                    )
-                    .eq("society", societyId)
-                    .eq("active", true)
-                    .order("block_name", { ascending: true }),
-
+        const [configuration, facilitiesRes, staffRes] = await Promise.all([
+                loadSocietyConfiguration(supabase, societyId),
                 supabase
                     .from("SSP_Facility")
                     .select(
@@ -428,20 +414,10 @@ serve(async (req: Request) => {
                     .order("staff_name", { ascending: true })
                     .limit(MAX_STAFF),
 
-                supabase
-                    .from("SSP_Flat_Type")
-                    .select(
-                        "flat_type_id,created_at,flat_type,maintenance_charges,society",
-                    )
-                    .eq("society", societyId),
             ]);
 
-        // Fail fast
-        if (towersRes.error) throw towersRes.error;
-        if (blocksRes.error) throw blocksRes.error;
         if (facilitiesRes.error) throw facilitiesRes.error;
         if (staffRes.error) throw staffRes.error;
-        if (flatTypesRes.error) throw flatTypesRes.error;
 
         const facilities = (facilitiesRes.data ?? []) as FacilityRow[];
 
@@ -467,17 +443,19 @@ serve(async (req: Request) => {
                 totalParkingSlot: society.parking_slot ?? "0",
                 currentAmenities: societyAmenities,
             },
-            towers: (towersRes.data ?? []).map((r) =>
+            towers: configuration.towers.map((r) =>
                 formatTower(r as TowerRow)
             ),
-            blocks: (blocksRes.data ?? []).map((r) =>
+            blocks: configuration.blocks.map((r) =>
                 formatBlock(r as BlockRow)
             ),
             staff: (staffRes.data ?? []).map((r) => formatStaff(r as StaffRow)),
-            flatTypes: (flatTypesRes.data ?? []).map((r) =>
+            flatTypes: configuration.flatTypes.map((r) =>
                 formatFlatType(r as FlatTypeRow)
             ),
             facilities: facilities.map(formatFacility),
+            societyConfiguration: formatSocietyConfiguration(configuration),
+            configurationVersion: await societyConfigurationVersion(societyId, formatSocietyConfiguration(configuration)),
         };
 
         console.log(

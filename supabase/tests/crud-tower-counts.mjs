@@ -1,5 +1,6 @@
 // Run with Node 26: node supabase/tests/crud-tower-counts.mjs
 import assert from 'node:assert/strict';
+import {parseConfigurationActiveFilter,resolveSocietyLocation,SocietyConfigurationInputError} from '../functions/_shared/society-configuration.ts';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 const source = stripTypeScriptTypes(readFileSync(new URL('../functions/crud-tower/index.ts', import.meta.url), 'utf8')
@@ -23,7 +24,7 @@ async function invoke(payload, { action = 'UPDATE', dbError = null, found = true
       async single() { return this.maybeSingle(); },
     };
   }};
-  new Function('Deno','serve','createClient',source)({ env: { get: () => '' } }, fn => handler = fn, () => client);
+  new Function('Deno','serve','createClient','resolveSocietyLocation','SocietyConfigurationInputError','parseConfigurationActiveFilter',source)({ env: { get: () => '' } }, fn => handler = fn, () => client,resolveSocietyLocation,SocietyConfigurationInputError,parseConfigurationActiveFilter);
   const response = await handler(new Request('https://test.example', { method: 'POST', body: JSON.stringify({
     societyRegistrationNumber: 'GZB-1234-ab', adminId: '447b74fd-9c15-4497-a4cb-2e9a8b1e2379',
     towerId: row.tower_id, action, payload,
