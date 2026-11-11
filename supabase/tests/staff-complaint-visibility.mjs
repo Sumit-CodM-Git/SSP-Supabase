@@ -1,3 +1,4 @@
+import {resolveVendorProfile} from "../functions/_shared/staff-identity.ts";
 import {parseComplaintAssignmentTime} from "../functions/_shared/complaint-time.ts";
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -22,8 +23,8 @@ class Query {
 const source=stripTypeScriptTypes(readFileSync('supabase/functions/staff-complaints/index.ts','utf8').replace(/^import\s[\s\S]*?from\s+["'][^"']+["'];?\s*$/gm,''));
 const response=(data,status=200)=>new Response(JSON.stringify({success:status===200,data}),{status});
 class Validator {validateRequired(){return this;}isValid(){return true;}}
-new Function('Deno','requireAuth','corsHeaders','errorResponse','successResponse','logger','sanitizeString','Validator','createClient','contactParkingSlot','parseComplaintAssignmentTime',source)(
- {env:{get:()=>''},serve:fn=>handler=fn},fn=>req=>fn(req,{user:{id:'agent'}}),{},msg=>response(msg,400),response,{info(){},warn(){},error(){}},x=>x,Validator,()=>({from:t=>new Query(t)}),contact=>contact?.parking_slot??null,parseComplaintAssignmentTime);
+new Function('Deno','requireAuth','corsHeaders','errorResponse','successResponse','logger','sanitizeString','Validator','createClient','contactParkingSlot','parseComplaintAssignmentTime','resolveVendorProfile',source)(
+ {env:{get:()=>''},serve:fn=>handler=fn},fn=>req=>fn(req,{user:{id:'agent'}}),{},msg=>response(msg,400),response,{info(){},warn(){},error(){}},x=>x,Validator,()=>({from:t=>new Query(t)}),contact=>contact?.parking_slot??null,parseComplaintAssignmentTime,resolveVendorProfile);
 async function call(options={}){const res=await handler(new Request('https://test',{method:'POST',body:JSON.stringify({societyRegistrationNumber:'TEST',staffType:'SERVICE_AGENT',staffId:'agent',actionType:'FETCH',...options})}));return {status:res.status,body:await res.json()};}
 
 for(const staffType of ['SERVICE_AGENT','Service Agent','service_agent','ServiceAgent','VENDOR','Vendor']){

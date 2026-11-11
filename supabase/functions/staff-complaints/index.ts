@@ -1,3 +1,4 @@
+import { resolveVendorProfile } from "../_shared/staff-identity.ts";
 import { parseComplaintAssignmentTime } from "../_shared/complaint-time.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 // // ============================================
@@ -1389,18 +1390,9 @@ async function validateStaff(
       };
     }
 
-    const { data: vendor, error } = await supabaseAdmin
-      .from("SSP_Non_Society_User")
-      .select(`non_society_user_id, name, role, phone_number, vendor_rating`)
-      .eq("non_society_user_id", staffId)
-      .eq("society", societyId)
-      .eq("role", "vendor")
-      .maybeSingle();
-
-    if (error) return { data: null, error: error.message };
-    if (!vendor) {
-      return { data: null, error: "Vendor not found in this society" };
-    }
+    const {data: vendor, error} = await resolveVendorProfile(supabaseAdmin, staffId, societyId);
+    if (error) return {data:null,error};
+    if (!vendor) return {data:null,error:"Vendor not found in this society"};
 
     return {
       data: {

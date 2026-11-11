@@ -1,3 +1,4 @@
+import { resolveComplaintAssignee } from "../_shared/staff.ts";
 import { runComplaintOtpCycle } from "../_shared/complaint-otp-cycle.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 // deno-lint-ignore-file no-import-prefix no-explicit-any
@@ -227,6 +228,7 @@ function buildError(
 
 async function getDirectStaffContext(
     authUserId: string,
+    preferredType?: StaffType,
 ): Promise<ContextSuccess | ContextFailure> {
     // ─── Try as service_agent ───
     const { data: agentRow, error: agentErr } = await supabaseAdmin
@@ -248,10 +250,10 @@ async function getDirectStaffContext(
         };
     }
 
-    if (agentRow && !agentRow.deleted_at) {
+    if (agentRow && !agentRow.deleted_at && preferredType !== "VENDOR") {
         const roles = Array.isArray(agentRow.role)
             ? (agentRow.role as string[])
-            : [];
+            : (agentRow.role ? [String(agentRow.role)] : []);
         const normalized = roles.map((r) =>
             r.toLowerCase().replace(/[\s-]+/g, "_")
         );
@@ -290,7 +292,7 @@ async function getDirectStaffContext(
     const { data: vendorRow, error: vendorErr } = await supabaseAdmin
         .from("SSP_Non_Society_User")
         .select(`
-            non_society_user_id, society, role, name, phone_number,
+            non_society_user_id, society, role, name, phone_number, deleted_at,
             society_data:SSP_Society!society ( registration_number )
         `)
         .eq("non_society_user_id", authUserId)
@@ -305,7 +307,7 @@ async function getDirectStaffContext(
         };
     }
 
-    if (vendorRow && (vendorRow.role ?? "").toLowerCase() === "vendor") {
+    if (vendorRow && !vendorRow.deleted_at && (vendorRow.role ?? "").trim().toLowerCase() === "vendor") {
         const societyRel = Array.isArray(vendorRow.society_data)
             ? vendorRow.society_data[0]
             : vendorRow.society_data;
@@ -333,71 +335,25 @@ async function getDirectStaffContext(
     };
 }
 
-// Resolve a vendor profile only through the complaint assignment and the
-// authenticated caller's stored profile. Never trust a caller-supplied staffId.
+// All complaint operations resolve the same assigned identity as complaint-otp.
 async function getStaffContext(
     authUserId: string,
     complaintId?: string,
+    authId?: string,
 ): Promise<ContextSuccess | ContextFailure> {
-    const direct = await getDirectStaffContext(authUserId);
-    if (!complaintId || (!direct.ok && direct.status !== 403)) return direct;
-
-    const { data: complaint, error: complaintErr } = await supabaseAdmin
-        .from("SSP_Complaint")
-        .select("assigned_agent, non_society_user")
-        .eq("complaint_id", complaintId)
-        .is("deleted_at", null)
-        .maybeSingle();
-    if (complaintErr) {
-        return { ok: false, code: "SERVER_ERROR", message: complaintErr.message, status: 500 };
-    }
-    if (!complaint) return direct;
-    // Keep the original identity when it is already assigned.
-    if (direct.ok && (
-        (direct.ctx.staffType === "SERVICE_AGENT" && complaint.assigned_agent === direct.ctx.staffId) ||
-        (direct.ctx.staffType === "VENDOR" && complaint.non_society_user === direct.ctx.staffId)
-    )) return direct;
-    if (!complaint.non_society_user) return direct;
-
-    const { data: caller, error: callerErr } = await supabaseAdmin
-        .from("SSP_Society_User")
-        .select("society, deleted_at, contact:SSP_Contact!contact(parking_slot, phone)")
-        .eq("user_id", authUserId)
-        .maybeSingle();
-    if (callerErr) {
-        return { ok: false, code: "SERVER_ERROR", message: callerErr.message, status: 500 };
-    }
-    const contact = Array.isArray(caller?.contact) ? caller.contact[0] : caller?.contact;
-    const phone = direct.ok ? direct.ctx.phone : contact?.phone;
-    const societyId = direct.ok ? direct.ctx.societyId : caller?.society;
-    const digits = String(phone ?? "").replace(/\D/g, "");
-    if ((!direct.ok && caller?.deleted_at) || digits.length < 10 || !societyId) return direct;
-
-    const { data: vendor, error: vendorErr } = await supabaseAdmin
-        .from("SSP_Non_Society_User")
-        .select("non_society_user_id, society, role, name, phone_number, deleted_at, society_data:SSP_Society!society(registration_number)")
-        .eq("non_society_user_id", complaint.non_society_user)
-        .eq("society", societyId)
-        .maybeSingle();
-    if (vendorErr) {
-        return { ok: false, code: "SERVER_ERROR", message: vendorErr.message, status: 500 };
-    }
-    const vendorPhone = String(vendor?.phone_number ?? "").replace(/\D/g, "");
-    if (!vendor || vendor.deleted_at || String(vendor.role).toLowerCase() !== "vendor" ||
-        vendorPhone.length < 10 || vendorPhone.slice(-10) !== digits.slice(-10)) return direct;
-    const society = Array.isArray(vendor.society_data) ? vendor.society_data[0] : vendor.society_data;
-    return {
-        ok: true,
-        ctx: {
-            authUserId,
-            staffId: vendor.non_society_user_id,
-            staffType: "VENDOR",
-            societyId: vendor.society,
-            societyRegistrationNumber: society?.registration_number ?? "",
-            name: vendor.name ?? "",
-            phone: vendor.phone_number ?? "",
-        },
+    if (!complaintId) return getDirectStaffContext(authUserId);
+    const assigned = await resolveComplaintAssignee({
+        complaintId, callerAuthId: authUserId, callerAuthUserId: authId,
+    });
+    if (!assigned.ok) return {
+        ok: false, status: assigned.code,
+        code: assigned.code === 403 ? "FORBIDDEN" : assigned.code === 404 ? "NOT_FOUND" : "SERVER_ERROR",
+        message: assigned.message,
     };
+    const staffId = assigned.role === "SERVICE_AGENT"
+        ? assigned.complaint.assigned_agent : assigned.complaint.non_society_user;
+    const direct = await getDirectStaffContext(String(staffId), assigned.role);
+    return direct.ok ? {ok:true, ctx:{...direct.ctx, authUserId}} : direct;
 }
 
 // ============================================
@@ -924,7 +880,7 @@ async function handleFetchOtp(
 // ============================================
 
 Deno.serve(
-    requireAuth(async (req: Request, authCtx: { user: { id: string } }) => {
+    requireAuth(async (req: Request, authCtx: { user: { id: string; authId?: string } }) => {
         if (req.method === "OPTIONS") {
             return new Response("ok", { headers: corsHeaders });
         }
@@ -965,7 +921,7 @@ Deno.serve(
             }
 
             // Resolve staff context
-            const ctxResult = await getStaffContext(authCtx.user.id, cleanText(body.complaintId, 50));
+            const ctxResult = await getStaffContext(authCtx.user.id, cleanText(body.complaintId, 50), authCtx.user.authId);
             if (!ctxResult.ok) {
                 return buildError(
                     req,
