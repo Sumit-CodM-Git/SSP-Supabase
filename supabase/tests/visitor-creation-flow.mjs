@@ -1,3 +1,4 @@
+import {visitorTimeISTISO} from '../functions/_shared/visitor-time.ts';
 import {visitorDateOtp} from "../functions/_shared/visitor-otp-date.ts";
 // Run: node supabase/tests/visitor-creation-flow.mjs
 import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {stripTypeScriptTypes} from 'node:module';
@@ -61,8 +62,8 @@ const failure=(message,status=400)=>new Response(JSON.stringify({message}),{stat
 const logger={info(){},warn(){},error(){}};
 class Validator{validateRequired(){return this}isValid(){return true}}
 function load(name){let handler;const src=stripTypeScriptTypes(readFileSync(new URL(`../functions/${name}/index.ts`,import.meta.url),'utf8').replace(/^import\s[\s\S]*?from\s+["'][^"']+["'];?\s*$/gm,''));
- new Function('Deno','createClient','requireAuth','corsHeaders','successResponse','errorResponse','createLogger','injectedLogger','sanitizeString','generateId','getCurrentTimestamp','Validator','findVisitorDraft','isVisitorOtpDraft','canCompleteVisitorDetails','VisitorDraftError','canVerifyVisitorOtp','findPendingVisitorForOtp','visitorDateOtp','contactParkingSlot','hasVisitorName','readVisitorName',(name==='visitor-otp'?'const logger=injectedLogger;\n':'')+src)
- ({env:{get:()=>''},serve:fn=>handler=fn},()=>client,fn=>fn,{},success,failure,()=>logger,logger,s=>String(s).trim(),()=>crypto.randomUUID(),()=>new Date().toISOString(),Validator,findVisitorDraft,isVisitorOtpDraft,canCompleteVisitorDetails,VisitorDraftError,canVerifyVisitorOtp,findPendingVisitorForOtp,visitorDateOtp,()=>null,hasVisitorName,readVisitorName);
+ new Function('Deno','createClient','requireAuth','corsHeaders','successResponse','errorResponse','createLogger','injectedLogger','sanitizeString','generateId','getCurrentTimestamp','Validator','findVisitorDraft','isVisitorOtpDraft','canCompleteVisitorDetails','VisitorDraftError','canVerifyVisitorOtp','findPendingVisitorForOtp','visitorDateOtp','contactParkingSlot','hasVisitorName','readVisitorName','visitorTimeISTISO',(name==='visitor-otp'?'const logger=injectedLogger;\n':'')+src)
+ ({env:{get:()=>''},serve:fn=>handler=fn},()=>client,fn=>fn,{},success,failure,()=>logger,logger,s=>String(s).trim(),()=>crypto.randomUUID(),()=>new Date().toISOString(),Validator,findVisitorDraft,isVisitorOtpDraft,canCompleteVisitorDetails,VisitorDraftError,canVerifyVisitorOtp,findPendingVisitorForOtp,visitorDateOtp,()=>null,hasVisitorName,readVisitorName,visitorTimeISTISO);
  return async body=>{const response=await handler(new Request('https://test',{method:'POST',body:JSON.stringify(body)}),{user:{id:'guard'}});return{status:response.status,body:await response.json()}};
 }
 const otp=load('visitor-otp'),security=load('visitor-pass-operations');

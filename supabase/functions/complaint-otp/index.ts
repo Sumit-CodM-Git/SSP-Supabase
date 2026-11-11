@@ -84,6 +84,7 @@ Deno.serve(
       const resolved = await resolveComplaintAssignee({
         complaintId: cid,
         callerAuthId: user.id,
+        callerAuthUserId: user.authId,
         callerPhone: (user as { phone?: string | null }).phone ?? null,
         select:
           "complaint_id, status, assigned_agent, non_society_user, " +

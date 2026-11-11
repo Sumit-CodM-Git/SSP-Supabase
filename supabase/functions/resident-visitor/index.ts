@@ -1,3 +1,4 @@
+import { visitorTimeISTISO } from "../_shared/visitor-time.ts";
 import { visitorApprovalState } from "../_shared/visitor-approval.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 // deno-lint-ignore-file no-import-prefix no-explicit-any
@@ -390,8 +391,8 @@ function toVisitorItem(
         vehicleNumber: raw.vehicle_number || null,
         idProofType: raw.id_proof_type || null,
         gateNumber: raw.gate_no || null,
-        checkInTime: raw.check_in || null,
-        checkOutTime: raw.check_out || null,
+        checkInTime: visitorTimeISTISO(raw.check_in),
+        checkOutTime: visitorTimeISTISO(raw.check_out),
         imageUrl,
         createdAt: raw.created_at || new Date().toISOString(),
     };

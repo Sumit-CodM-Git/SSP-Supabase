@@ -502,7 +502,9 @@ Deno.serve(
         });
 
         // If no matches, show all service agents
-        const agentsToShow = matchedAgents.length > 0
+        const agentsToShow = normalizedComplaintType === "general"
+          ? serviceAgents
+          : matchedAgents.length > 0
           ? matchedAgents
           : serviceAgents;
 
@@ -564,7 +566,9 @@ Deno.serve(
           );
         });
 
-        const vendorsToShow = matchedVendors.length > 0
+        const vendorsToShow = normalizedComplaintType === "general"
+          ? allVendors
+          : matchedVendors.length > 0
           ? matchedVendors
           : allVendors;
 

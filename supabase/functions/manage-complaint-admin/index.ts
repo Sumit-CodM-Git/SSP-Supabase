@@ -1,3 +1,4 @@
+import { complaintAssignmentISTISO } from "../_shared/complaint-time.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 // deno-lint-ignore-file no-import-prefix no-explicit-any
 // ============================================
@@ -809,7 +810,7 @@ async function handleView(
             priority: String(c.priority ?? "medium").toLowerCase(),
             complaintType: String(c.complaint_type ?? "general").toLowerCase(),
             createdAt: c.created_at ?? null,
-            assignedDateTime: c.assigned_date_time ?? null,
+            assignedDateTime: complaintAssignmentISTISO(c.assigned_date_time),
             completionDateTime: c.completion_date_time ?? null,
             residentDetails: {
                 parkingSlot: contactParkingSlot(residentContact),
@@ -1021,7 +1022,7 @@ async function handleAssign(
             ? {
                 complaintId: updated.complaint_id,
                 status: updated.status,
-                assignedDateTime: updated.assigned_date_time,
+                assignedDateTime: complaintAssignmentISTISO(updated.assigned_date_time),
                 assignedAgentId: updated.assigned_agent,
                 assignedVendorId: updated.non_society_user,
                 assignedBy: updated.assigned_by,
@@ -1103,8 +1104,10 @@ async function handleStaffList(
         if (!roles.includes("service_agent")) continue;
 
         const services = parseServiceTypes(a.service_agent_services);
-        if (services.length === 0) continue;
-        if (!matchesComplaintType(services, normalized, isOther)) continue;
+        // General complaints can be handled by any service agent, including
+        // those without a configured specialty.
+        if (normalized !== "general" &&
+            (services.length === 0 || !matchesComplaintType(services, normalized, isOther))) continue;
 
         const c = Array.isArray(a.contact) ? a.contact[0] : a.contact;
         const rating = a.service_agent_rating !== null &&
@@ -1142,8 +1145,8 @@ async function handleStaffList(
         }>
     ) {
         const services = parseServiceTypes(v.service_type);
-        if (services.length === 0) continue;
-        if (!matchesComplaintType(services, normalized, isOther)) continue;
+        if (normalized !== "general" &&
+            (services.length === 0 || !matchesComplaintType(services, normalized, isOther))) continue;
 
         availableStaff.push({
             id: v.non_society_user_id,

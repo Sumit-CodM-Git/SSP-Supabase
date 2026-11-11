@@ -1,3 +1,4 @@
+import { resolveResidentFlatType, residentFlatTypeFields, ResidentFlatTypeError } from "../_shared/resident-flat-type.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 import { normalizeParkingSlot } from "../_shared/contact.ts";
 import { type AuthContext, requireAuth } from "../_shared/auth.ts";
@@ -65,6 +66,8 @@ const VEHICLE_TYPE_VALUES = [
 
 // ---- Staff-only fields: self-updates cannot touch these ----
 const STAFF_ONLY_FIELDS: ReadonlySet<string> = new Set([
+  "flatTypeId",
+  "flatType",
   "flatNumber",
   "block",
   "tower",
@@ -105,6 +108,8 @@ const MAX_EMAIL = 254;
 type ActionType = "FETCH_ONE" | "FETCH_ALL" | "UPDATE";
 
 interface MergedRequest {
+  flatTypeId?: string | null;
+  flatType?: string | null;
   actionType?: ActionType;
   operation?: string;
   societyRegistrationNumber: string;
@@ -174,6 +179,8 @@ interface TowerRecord {
 }
 
 interface ResidentProfileRecord {
+  flat_type_id?: string | null;
+  flatTypeRecord?: {flat_type?: string | null} | {flat_type?: string | null}[] | null;
   user_id?: string | null;
   role?: string[] | string | null;
   user_type?: string | null;
@@ -197,6 +204,8 @@ interface SocietyContext {
 }
 
 interface TargetResident {
+  flat_type_id?: string | null;
+  flatTypeRecord?: {flat_type?: string | null} | null;
   user_id: string;
   role: string[] | null;
   contact:
@@ -303,6 +312,7 @@ function buildProfile(record: ResidentProfileRecord, society: SocietyContext) {
     },
     residentialInformation: {
       society: derivedSocietyName,
+      ...residentFlatTypeFields(record),
       flatNumber: record.unit_flat_number ?? "NA",
       block: String(rawBlock?.block_name ?? "NA"),
       tower: String(rawTower?.name ?? "NA"),
@@ -700,7 +710,7 @@ Deno.serve(
         let userQuery = supabaseAdmin
           .from("SSP_Society_User")
           .select(`
-            user_id, unit_flat_number, status, move_in_date, move_out_date,
+            user_id, unit_flat_number, flat_type_id, flatTypeRecord:SSP_Flat_Type!flat_type_id(flat_type), status, move_in_date, move_out_date,
             user_ownership_type, user_type, role,
             contact:SSP_Contact!inner(parking_slot,
               contact_id, name, phone, email, whatsapp_phone, gender,
@@ -819,7 +829,7 @@ Deno.serve(
             .select(
               `
               user_id,
-              unit_flat_number,
+              unit_flat_number, flat_type_id, flatTypeRecord:SSP_Flat_Type!flat_type_id(flat_type),
               role,
               user_type,
               user_ownership_type,
@@ -970,7 +980,7 @@ Deno.serve(
 
         return successResponse(
           asPayload({
-            residents: records ?? [],
+            residents: (records ?? []).map(row => ({...row, ...residentFlatTypeFields(row)})),
             pagination: {
               total,
               page: pageNum,
@@ -1037,7 +1047,7 @@ Deno.serve(
         let userQuery = supabaseAdmin
           .from("SSP_Society_User")
           .select(`
-            user_id,
+            user_id, flat_type_id, flatTypeRecord:SSP_Flat_Type!flat_type_id(flat_type),
             role,
             contact:SSP_Contact!inner(parking_slot, contact_id, name)
           `)
@@ -1093,6 +1103,8 @@ Deno.serve(
         const parkingSlot = normalizeParkingSlot(body.parkingSlot !== undefined ? body.parkingSlot : body.parking_slot);
         if (parkingSlot !== undefined) contactUpdates.parking_slot = parkingSlot;
         const userUpdates: Record<string, unknown> = {};
+        const resolvedFlatType = await resolveResidentFlatType(supabaseAdmin, societyContext.society_id, body);
+        if (resolvedFlatType) userUpdates.flat_type_id = resolvedFlatType.flatTypeId;
 
         try {
           // ---------- SSP_Contact fields ----------
@@ -1473,6 +1485,7 @@ Deno.serve(
             profileUpdate: {
               updated:
                 `Profile for identifier '${cleanResidentId}' updated successfully.`,
+              ...(resolvedFlatType ?? residentFlatTypeFields(su)),
               recordId: su.user_id,
               contactId: targetContactId,
               ...(parkingSlot !== undefined ? { parkingSlot } : {}),
@@ -1483,6 +1496,7 @@ Deno.serve(
 
       return errorResponse("Unhandled actionType.", 400);
     } catch (error: unknown) {
+      if (error instanceof ResidentFlatTypeError) return errorResponse(error.message, 400);
       const err = error as Error;
 
       // FieldValidationError (thrown outside the inner try/catch, e.g. by

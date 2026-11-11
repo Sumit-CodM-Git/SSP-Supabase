@@ -1,3 +1,4 @@
+import { parseComplaintAssignmentTime } from "../_shared/complaint-time.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 // import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -1162,7 +1163,7 @@ Deno.serve(
           priority: comp.priority || "medium",
           type: comp.complaint_type || "general",
           createdAt: comp.created_at || new Date().toISOString(),
-          assignedDateTime: formatToIST(comp.assigned_date_time),
+          assignedDateTime: formatToIST(parseComplaintAssignmentTime(comp.assigned_date_time)),
           completionDateTime: formatToIST(comp.completion_date_time),
           assignedAgent: {
             agentId: comp.assigned_agent || null,

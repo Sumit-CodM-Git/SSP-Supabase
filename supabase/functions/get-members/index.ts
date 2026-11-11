@@ -1,3 +1,4 @@
+import { residentFlatTypeFields } from "../_shared/resident-flat-type.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 // import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -641,7 +642,7 @@ Deno.serve(
                         service_agent_rating,
                         shift,
                         status,
-                        unit_flat_number,
+                        unit_flat_number, flat_type_id, flatTypeRecord:SSP_Flat_Type!flat_type_id(flat_type),
                         user_ownership_type,
                         user_type,
                         SSP_Block!left (
@@ -722,6 +723,7 @@ Deno.serve(
                 shift: su.shift || "NA",
                 status: su.status ? "active" : "inactive",
                 towerName: towerData?.name || "NA",
+                ...residentFlatTypeFields(su),
                 unitFlatNumber: su.unit_flat_number || "NA",
                 userOwnershipType: su.user_ownership_type || "NA",
                 userType: su.user_type || "NA",

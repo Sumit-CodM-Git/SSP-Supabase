@@ -24,7 +24,6 @@ interface Society {
     society_id: string;
     society_name: string;
     registration_number: string;
-    subscription_plan: string;
     address_line1: string;
     city: string;
     state: string;
@@ -50,6 +49,7 @@ interface Alert {
     message: string;
     type: string;
     published_date: string;
+    expiry_date: string | null;
     created_at: string;
 }
 
@@ -74,6 +74,7 @@ interface FormattedAlert {
     message: string;
     type: string;
     publishedDate: string;
+    expiryDate: string | null;
     createdAt: string;
     isToday: boolean;
 }
@@ -100,7 +101,6 @@ interface DashboardResponse {
         id: string | null;
         name: string;
         registrationNumber: string | null;
-        subscriptionPlan: string;
         address: string;
         statistics: {
             totalFlats: number;
@@ -208,7 +208,7 @@ async function getSmartAlerts(
         const { data: allAlerts, error } = await supabaseAdmin
             .from("SSP_Alert")
             .select(
-                `alert_id, title, message, type, published_date, created_at`,
+                `alert_id, title, message, type, published_date, expiry_date, created_at`,
             )
             .eq("society", societyId)
             .gte("published_date", todayStr)
@@ -282,6 +282,7 @@ function formatAlertResponse(alert: Alert, isToday: boolean): FormattedAlert {
         message: alert.message || "",
         type: alert.type || "info",
         publishedDate: alert.published_date,
+        expiryDate: alert.expiry_date ?? null,
         createdAt: alert.created_at,
         isToday: isToday,
     };
@@ -442,7 +443,6 @@ Deno.serve(
                         society_id,
                         society_name,
                         registration_number,
-                        subscription_plan,
                         address_line1,
                         city,
                         state,
@@ -658,7 +658,6 @@ async function buildDashboardResponse(
                 id: user.society?.society_id || null,
                 name: user.society?.society_name || "N/A",
                 registrationNumber: user.society?.registration_number || null,
-                subscriptionPlan: user.society?.subscription_plan || "growth",
                 address: user.society
                     ? `${user.society.address_line1 || ""}, ${
                         user.society.city || ""
@@ -737,7 +736,6 @@ async function buildDashboardResponse(
 //   society_id: string;
 //   society_name: string;
 //   registration_number: string;
-//   subscription_plan: string;
 //   address_line1: string;
 //   city: string;
 //   state: string;
@@ -810,7 +808,6 @@ async function buildDashboardResponse(
 //     id: string | null;
 //     name: string;
 //     registrationNumber: string | null;
-//     subscriptionPlan: string;
 //     address: string;
 //     statistics: {
 //       totalFlats: number;
@@ -1168,7 +1165,6 @@ async function buildDashboardResponse(
 //                 society_id,
 //                 society_name,
 //                 registration_number,
-//                 subscription_plan,
 //                 address_line1,
 //                 city,
 //                 state,
@@ -1398,7 +1394,6 @@ async function buildDashboardResponse(
 //         id: user.society?.society_id || null,
 //         name: user.society?.society_name || "N/A",
 //         registrationNumber: user.society?.registration_number || null,
-//         subscriptionPlan: user.society?.subscription_plan || "growth",
 //         address: user.society
 //           ? `${user.society.address_line1 || ""}, ${
 //               user.society.city || ""

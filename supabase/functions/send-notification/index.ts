@@ -1,3 +1,4 @@
+import { notificationRoutingData } from "../_shared/notification-routing.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as DJWT from "https://deno.land/x/djwt@v2.8/mod.ts";
@@ -201,15 +202,7 @@ serve(async (req) => {
                   title: notification.title ?? "",
                   body: notification.message ?? "",
                 },
-                data: {
-                  notificationId: String(notification.notification_id ?? ""),
-                  type: String(notification.notification_type ?? ""),
-                  screen: String(notification.navigation_screen ?? ""),
-                  referenceId: String(notification.reference_id ?? ""),
-                  referenceTable: String(notification.reference_table ?? ""),
-                  title: String(notification.title ?? ""),
-                  body: String(notification.message ?? ""),
-                },
+                data: notificationRoutingData(notification),
                 android: { priority: "high" },
                 apns: { payload: { aps: { sound: "default" } } },
               },

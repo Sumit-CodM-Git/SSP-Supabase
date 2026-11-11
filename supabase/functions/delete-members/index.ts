@@ -1,3 +1,4 @@
+import { residentFlatTypeFields } from "../_shared/resident-flat-type.ts";
 // import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // const corsHeaders = {
@@ -366,7 +367,7 @@ Deno.serve(
       }
       const {data: target, error: targetError} = await supabaseAdmin
         .from(targetType === "vendor" ? "SSP_Non_Society_User" : "SSP_Society_User")
-        .select("society")
+        .select(targetType === "vendor" ? "society" : "society,flat_type_id,flatTypeRecord:SSP_Flat_Type!flat_type_id(flat_type)")
         .eq(targetType === "vendor" ? "non_society_user_id" : "user_id", targetMemberId)
         .maybeSingle();
       if (targetError) throw new Error("Failed to verify member society.");
@@ -407,7 +408,7 @@ Deno.serve(
       }
 
       return successResponse({
-        deletedMember: response,
+        deletedMember: {...response, ...(targetType === "vendor" ? {} : residentFlatTypeFields(target))},
       });
     } catch (error: any) {
       console.error("❌ delete-members error:", error);

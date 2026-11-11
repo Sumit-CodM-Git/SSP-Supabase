@@ -1,3 +1,4 @@
+import {residentFlatTypeFields} from '../functions/_shared/resident-flat-type.ts';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {stripTypeScriptTypes} from 'node:module';
@@ -14,7 +15,7 @@ let handler;
 const source=stripTypeScriptTypes(readFileSync('supabase/functions/delete-members/index.ts','utf8').replace(/^import\s[\s\S]*?from\s+["'][^"']+["'];?\s*$/gm,''));
 const success=data=>new Response(JSON.stringify({success:true,data}));
 const error=(message,status)=>new Response(JSON.stringify({message}),{status});
-new Function('Deno','requireAuth','corsHeaders','errorResponse','successResponse','parseRequestBody','createClient','console',source)({env:{get:()=>''},serve:fn=>handler=fn},fn=>req=>fn(req,{user:{id:actor}}),{},error,success,req=>req.json(),()=>({from:t=>new Query(t)}),{log(){},error(){},warn(){}});
+new Function('Deno','requireAuth','corsHeaders','errorResponse','successResponse','parseRequestBody','createClient','console','residentFlatTypeFields',source)({env:{get:()=>''},serve:fn=>handler=fn},fn=>req=>fn(req,{user:{id:actor}}),{},error,success,req=>req.json(),()=>({from:t=>new Query(t)}),{log(){},error(){},warn(){}},residentFlatTypeFields);
 async function call(body={memberId:member}){const res=await handler(new Request('https://test',{method:'POST',body:JSON.stringify(body)}));return {status:res.status,body:await res.json()};}
 reset();const history=JSON.stringify([tables.SSP_Non_Society_User,tables.SSP_Contact,tables.SSP_Payment,tables.SSP_Complaint]);
 assert.equal((await call()).status,200);const deleted=tables.SSP_Society_User[1];assert.ok(deleted.deleted_at);assert.equal(deleted.status,false);assert.equal(deleted.one_time_password_otp,null);

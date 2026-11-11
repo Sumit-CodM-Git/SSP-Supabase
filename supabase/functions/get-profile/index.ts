@@ -1,3 +1,4 @@
+import { residentFlatTypeFields } from "../_shared/resident-flat-type.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Validator } from "../_shared/validation.ts";
@@ -152,7 +153,7 @@ Deno.serve(async (req: Request) => {
         const { data: suData } = await supabase
           .from("SSP_Society_User")
           .select(`
-            role, unit_flat_number, status, move_in_date, move_out_date, user_ownership_type, user_type,
+            role, unit_flat_number, flat_type_id, flatTypeRecord:SSP_Flat_Type!flat_type_id(flat_type), status, move_in_date, move_out_date, user_ownership_type, user_type,
             agent_availability_status, service_agent_services,
             SSP_Block!left ( block_name ),
             SSP_Tower!left ( name )
@@ -175,6 +176,7 @@ Deno.serve(async (req: Request) => {
             role: displayRole, // <--- THIS FIXES THE FLUTTER UI OVERWRITE BUG
             blockName: blockObj?.block_name ?? "NA",
             towerName: towerObj?.name ?? "NA",
+            ...residentFlatTypeFields(suData),
             unitFlatNumber: suData.unit_flat_number ?? "NA",
             status: suData.status ? "Active" : "Inactive",
             moveInDate: suData.move_in_date ?? null,

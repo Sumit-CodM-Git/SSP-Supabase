@@ -1,3 +1,4 @@
+import { visitorTimeISTISO } from "../_shared/visitor-time.ts";
 import { hasVisitorName, readVisitorName, VisitorDraftError, findVisitorDraft, isVisitorOtpDraft, canCompleteVisitorDetails } from "../_shared/visitor-drafts.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 /*import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
@@ -490,7 +491,7 @@ async function attachSignedURLsToVisitors(
         purpose: v.purpose ?? 'N/A',
         vehicle: v.vehicle_number ?? 'N/A',
         status: v.visitor_status ?? '',
-        checkIn: v.check_in ?? null,
+        checkIn: visitorTimeISTISO(v.check_in),
 
         flat: v.hosted_by?.unit_flat_number ?? 'N/A',
         block:
@@ -1132,8 +1133,8 @@ async function attachSignedURLsToVisitors(
         purpose: v.purpose ?? "N/A",
         vehicle: v.vehicle_number ?? "N/A",
         status: v.visitor_status ?? "",
-        checkIn: v.check_in ?? null,
-        checkOut: v.check_out ?? null, // Included checkOut in returned response payload
+        checkIn: visitorTimeISTISO(v.check_in),
+        checkOut: visitorTimeISTISO(v.check_out), // Included checkOut in returned response payload
         flat: v.hosted_by?.unit_flat_number ?? "N/A",
         block: v.hosted_by?.block?.block_name ?? "N/A",
         tower: v.hosted_by?.tower?.name ?? "N/A",

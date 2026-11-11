@@ -1,3 +1,4 @@
+import { visitorTimeISTISO } from "../_shared/visitor-time.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 // import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -950,7 +951,7 @@ import { contactParkingSlot } from "../_shared/contact.ts";
 //       // ============================================
 //       // STEP 7: Calculate Stats
 //       // ============================================
-//       const todayStr = new Date().toISOString().split("T")[0];
+//       const todayStr = visitorTimeISTISO(new Date())!.split("T")[0];
 //       let totalVisitedToday = 0;
 //       let currentlyInside = 0;
 //       let currentlyOutside = 0;
@@ -1469,8 +1470,8 @@ function normalizeVisitorData(
           towerName: tower?.name || null,
         }
       : null,
-    checkIn: rawVisitor.check_in || null,
-    checkOut: rawVisitor.check_out || null,
+    checkIn: visitorTimeISTISO(rawVisitor.check_in),
+    checkOut: visitorTimeISTISO(rawVisitor.check_out),
     isRecurring: rawVisitor.is_recurring || null,
     recurringDays: rawVisitor.recurring_days || null,
     vehicleNumber: rawVisitor.vehicle_number || null,
@@ -1659,9 +1660,11 @@ Deno.serve(
         );
       }
 
-      const { data: visitors, error: fetchErr } = await query.order("check_in", {
-        ascending: false,
-      });
+      // Newly added entries come first, including guests/deliveries whose
+      // check-in is pending or scheduled. Keep ties stable across pages.
+      const { data: visitors, error: fetchErr } = await query
+        .order("created_at", { ascending: false, nullsFirst: false })
+        .order("non_society_user_id", { ascending: false });
 
       if (fetchErr) {
         logger.error({
@@ -1755,7 +1758,7 @@ Deno.serve(
       // --------------------------------------------------
       // STEP 7: Stats
       // --------------------------------------------------
-      const todayStr = new Date().toISOString().split("T")[0];
+      const todayStr = visitorTimeISTISO(new Date())!.split("T")[0];
       let totalVisitedToday = 0;
       let currentlyInside = 0;
       let currentlyOutside = 0;

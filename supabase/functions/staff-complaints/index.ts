@@ -1,3 +1,4 @@
+import { parseComplaintAssignmentTime } from "../_shared/complaint-time.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 // // ============================================
 // // staff-complaints - Unified API for Staff (Optimized)
@@ -509,7 +510,7 @@ import { contactParkingSlot } from "../_shared/contact.ts";
 //       }
 
 //       if (
-//         filterOption && filterOption.toLowerCase() === "custom" &&
+//         !isDetailRequest && filterOption && filterOption.toLowerCase() === "custom" &&
 //         (!fromDate || !toDate)
 //       ) {
 //         return errorResponse("fromDate and toDate are required for Custom filter.");
@@ -655,7 +656,7 @@ import { contactParkingSlot } from "../_shared/contact.ts";
 //       }
 
 //       // ------- FETCH complaints -------
-//       const pageNum = Number(page) || 1;
+//       const pageNum = isDetailRequest ? 1 : Number(page) || 1;
 //       const limitNum = Math.min(Number(limit) || DEFAULT_LIMIT, MAX_LIMIT);
 
 //       let query = supabaseAdmin
@@ -1460,7 +1461,7 @@ Deno.serve(
 
       const {
         societyRegistrationNumber,
-        staffType,
+        staffType: requestedStaffType,
         staffId,
         actionType,
         status,
@@ -1476,6 +1477,14 @@ Deno.serve(
         page,
         limit,
       } = body as StaffComplaintsRequest;
+
+      const normalizedStaffType = String(requestedStaffType ?? "").trim()
+        .toUpperCase().replace(/[\s_-]+/g, "");
+      const staffType = normalizedStaffType === "SERVICEAGENT" ? "SERVICE_AGENT"
+        : normalizedStaffType === "VENDOR" ? "VENDOR" : null;
+      if (!staffType) return errorResponse("staffType must be SERVICE_AGENT or VENDOR.");
+      const requestedComplaintId = String(complaintId ?? "").trim();
+      const isDetailRequest = Boolean(requestedComplaintId);
 
       const validator = new Validator()
         .validateRequired(
@@ -1493,7 +1502,7 @@ Deno.serve(
       }
 
       if (
-        filterOption && filterOption.toLowerCase() === "custom" &&
+        !isDetailRequest && filterOption && filterOption.toLowerCase() === "custom" &&
         (!fromDate || !toDate)
       ) {
         return errorResponse(
@@ -1652,7 +1661,7 @@ Deno.serve(
       }
 
       // ------- FETCH complaints -------
-      const pageNum = Number(page) || 1;
+      const pageNum = isDetailRequest ? 1 : Number(page) || 1;
       const limitNum = Math.min(Number(limit) || DEFAULT_LIMIT, MAX_LIMIT);
 
       let query = supabaseAdmin
@@ -1685,21 +1694,23 @@ Deno.serve(
         query = query.eq("non_society_user", staffIdValue);
       }
 
-      if (status && status.trim() !== "" && status.trim().toLowerCase() !== "all") {
+      if (isDetailRequest) query = query.eq("complaint_id", requestedComplaintId);
+
+      if (!isDetailRequest && status && status.trim() !== "" && status.trim().toLowerCase() !== "all") {
         query = query.ilike("status", status.trim());
       }
 
       if (
-        complaintType && complaintType.trim() !== "" &&
+        !isDetailRequest && complaintType && complaintType.trim() !== "" &&
         complaintType.toLowerCase() !== "all"
       ) {
-        query = query.eq("complaint_type", complaintType.trim());
+        query = query.ilike("complaint_type", complaintType.trim());
       }
 
       if (
-        priority && priority.trim() !== "" && priority.toLowerCase() !== "all"
+        !isDetailRequest && priority && priority.trim() !== "" && priority.toLowerCase() !== "all"
       ) {
-        query = query.eq("priority", priority.trim());
+        query = query.ilike("priority", priority.trim());
       }
 
       const dateBounds = calculateDateBounds(
@@ -1707,10 +1718,10 @@ Deno.serve(
         fromDate,
         toDate,
       );
-      if (dateBounds) {
+      if (!isDetailRequest && dateBounds) {
         query = query
-          .gte("assigned_date_time", dateBounds.startISO)
-          .lt("assigned_date_time", dateBounds.endISO);
+          .gte("assigned_date_time", new Date(Date.parse(dateBounds.startISO) + 330 * 60_000).toISOString().slice(0, -1))
+          .lt("assigned_date_time", new Date(Date.parse(dateBounds.endISO) + 330 * 60_000).toISOString().slice(0, -1));
       }
 
       const isResolvedFilter = status?.trim().toLowerCase() === "resolved";
@@ -1843,7 +1854,7 @@ Deno.serve(
             complaintType: comp.complaint_type || "general",
             priority: comp.priority || "medium",
             createdAt: comp.created_at || new Date().toISOString(),
-            assignedDateTime: formatToIST(comp.assigned_date_time),
+            assignedDateTime: formatToIST(parseComplaintAssignmentTime(comp.assigned_date_time)),
             completionDateTime: formatToIST(comp.completion_date_time),
             residentDetails: {
               parkingSlot: contactParkingSlot(contact),
@@ -1867,7 +1878,7 @@ Deno.serve(
       for (const comp of rawComplaints) {
         sortKeys.set(comp.complaint_id, {
           assignedDT: comp.assigned_date_time
-            ? new Date(comp.assigned_date_time).getTime()
+            ? parseComplaintAssignmentTime(comp.assigned_date_time)?.getTime() ?? 0
             : 0,
           completionDT: comp.completion_date_time
             ? new Date(comp.completion_date_time).getTime()
@@ -1880,7 +1891,7 @@ Deno.serve(
 
       // ------- Search -------
       let filteredComplaints = formattedComplaints;
-      if (search) {
+      if (!isDetailRequest && search) {
         filteredComplaints = applySearchFilter(filteredComplaints, search);
       }
 

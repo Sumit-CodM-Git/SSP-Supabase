@@ -1,3 +1,4 @@
+import { resolveResidentFlatType, residentFlatTypeFields, ResidentFlatTypeError } from "../_shared/resident-flat-type.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 import { normalizeParkingSlot } from "../_shared/contact.ts";
 // // deno-lint-ignore-file no-import-prefix no-explicit-any
@@ -1384,6 +1385,7 @@ interface CallerCtx {
     callerUserId: string;
     callerSocietyId: string;
     callerFlat: string;
+    callerFlatTypeId: string | null;
     callerBlock: string | null;
     callerTower: string | null;
     callerOwnership: string;
@@ -1391,6 +1393,8 @@ interface CallerCtx {
 }
 
 interface CrudFamilyRequest {
+    flatTypeId?: string | null;
+    flatType?: string | null;
     action: Action;
     memberName?: string;
     memberPhone?: string;
@@ -1608,7 +1612,7 @@ async function authenticate(
     const { data, error } = await admin
         .from("SSP_Society_User")
         .select(
-            "user_id, society, unit_flat_number, block, tower, user_ownership_type, role, deleted_at",
+            "user_id, society, unit_flat_number, flat_type_id, flatTypeRecord:SSP_Flat_Type!flat_type_id(flat_type), block, tower, user_ownership_type, role, deleted_at",
         )
         .eq("user_id", callerUserId)
         .maybeSingle();
@@ -1636,6 +1640,7 @@ async function authenticate(
             authUserId,
             callerUserId,
             callerSocietyId: String(data.society ?? ""),
+            callerFlatTypeId: data.flat_type_id ?? null,
             callerFlat: String(data.unit_flat_number ?? "").trim(),
             callerBlock: data.block ?? null,
             callerTower: data.tower ?? null,
@@ -1730,7 +1735,7 @@ async function handleCreate(
     const idemPromise = body.idempotencyKey
         ? admin
             .from("SSP_Society_User")
-            .select("user_id, created_at")
+            .select("user_id, created_at, flat_type_id, flatTypeRecord:SSP_Flat_Type!flat_type_id(flat_type)")
             .eq("idempotency_key", body.idempotencyKey)
             .maybeSingle()
         : Promise.resolve({ data: null, error: null } as any);
@@ -1770,6 +1775,7 @@ async function handleCreate(
                 updated: true,
                 action: "CREATE",
                 residentId: idemRes.data.user_id,
+                ...residentFlatTypeFields(idemRes.data),
                 idempotentReplay: true,
                 createdAt: idemRes.data.created_at,
             },
@@ -1790,6 +1796,18 @@ async function handleCreate(
             `A member with phone ${phone} already exists in this flat.`,
             400,
         );
+    }
+
+    const explicitFlatType = body.flatTypeId !== undefined || body.flatType !== undefined;
+    let resolvedFlatType;
+    try {
+        resolvedFlatType = await resolveResidentFlatType(admin, ctx.callerSocietyId,
+            explicitFlatType ? body : {flatTypeId:ctx.callerFlatTypeId});
+    } catch (error) {
+        // A stale inherited assignment must not block a legacy CREATE request.
+        // Explicit assignments still require an active type in this society.
+        if (explicitFlatType || !(error instanceof ResidentFlatTypeError)) throw error;
+        resolvedFlatType = {flatTypeId:null, flatType:null};
     }
 
     // ---- Contact: reuse or create ----
@@ -1844,6 +1862,7 @@ async function handleCreate(
     const { data: newUser, error: uErr } = await admin
         .from("SSP_Society_User")
         .insert({
+            flat_type_id: resolvedFlatType?.flatTypeId ?? null,
             contact: contactId,
             society: ctx.callerSocietyId,
             unit_flat_number: ctx.callerFlat,
@@ -1872,6 +1891,7 @@ async function handleCreate(
         familyUpdate: {
             updated: true,
             action: "CREATE",
+            ...(resolvedFlatType ?? {flatTypeId:null,flatType:null}),
             residentId: newUser.user_id,
             contactId,
             parkingSlot: (body.parkingSlot !== undefined || body.parking_slot !== undefined)
@@ -1908,7 +1928,7 @@ async function handleView(
             relationship,
             status,
             deleted_at,
-            unit_flat_number,
+            unit_flat_number, flat_type_id, flatTypeRecord:SSP_Flat_Type!flat_type_id(flat_type),
             tower,
             block,
             created_at,
@@ -2046,6 +2066,7 @@ async function handleView(
             deletedAt: m.deleted_at ?? null,
             towerId: m.tower ?? null,
             blockId: m.block ?? null,
+            ...residentFlatTypeFields(m),
             flatNumber: m.unit_flat_number ?? "",
             createdAt: cObj.created_at ?? m.created_at ?? null,
         };
@@ -2100,7 +2121,7 @@ async function handleUpdate(
     const { data: target, error: tErr } = await admin
         .from("SSP_Society_User")
         .select(
-            "user_id, society, unit_flat_number, block, tower, contact, user_ownership_type, deleted_at",
+            "user_id, society, unit_flat_number, flat_type_id, flatTypeRecord:SSP_Flat_Type!flat_type_id(flat_type), block, tower, contact, user_ownership_type, deleted_at",
         )
         .eq("user_id", targetId)
         .maybeSingle();
@@ -2181,8 +2202,13 @@ async function handleUpdate(
         cu.vehicle_type = cleanText(body.vehicleType, 30) || null;
     }
 
+    if (!isPrimary && (body.flatTypeId !== undefined || body.flatType !== undefined))
+        return buildError(req, "FORBIDDEN", "Only the primary resident can change flat type assignments.", 403);
+    const resolvedFlatType = await resolveResidentFlatType(admin, ctx.callerSocietyId, body);
+
     // ---- Build user updates ----
     const uu: Record<string, unknown> = {};
+    if (resolvedFlatType) uu.flat_type_id = resolvedFlatType.flatTypeId;
 
     if (isPrimary) {
         if (body.relationship !== undefined) {
@@ -2292,7 +2318,7 @@ async function handleUpdate(
     console.log(`[crud-family][UPDATE] TOTAL ${Date.now() - t0}ms`);
 
     return buildSuccess(req, {
-        familyUpdate: { updated: true, action: "UPDATE", residentId: targetId, ...(parkingSlot !== undefined ? { parkingSlot } : {}) },
+        familyUpdate: { updated: true, action: "UPDATE", residentId: targetId, ...(resolvedFlatType ?? residentFlatTypeFields(target)), ...(parkingSlot !== undefined ? { parkingSlot } : {}) },
     });
 }
 
@@ -2334,7 +2360,7 @@ async function handleDelete(
     const { data: target } = await admin
         .from("SSP_Society_User")
         .select(
-            "user_id, society, unit_flat_number, block, tower, user_ownership_type, deleted_at",
+            "user_id, society, unit_flat_number, flat_type_id, flatTypeRecord:SSP_Flat_Type!flat_type_id(flat_type), block, tower, user_ownership_type, deleted_at",
         )
         .eq("user_id", targetId)
         .maybeSingle();
@@ -2384,6 +2410,7 @@ async function handleDelete(
         familyUpdate: {
             updated: true,
             action: "DELETE",
+            ...residentFlatTypeFields(target),
             residentId: targetId,
             soft: true,
         },
@@ -2417,7 +2444,7 @@ async function handleRestore(
 
     const { data: target } = await admin
         .from("SSP_Society_User")
-        .select("user_id, society, unit_flat_number, block, tower, deleted_at")
+        .select("user_id, society, unit_flat_number, flat_type_id, flatTypeRecord:SSP_Flat_Type!flat_type_id(flat_type), block, tower, deleted_at")
         .eq("user_id", targetId)
         .maybeSingle();
 
@@ -2460,6 +2487,7 @@ async function handleRestore(
         familyUpdate: {
             updated: true,
             action: "RESTORE",
+            ...residentFlatTypeFields(target),
             residentId: targetId,
         },
     });
@@ -2494,7 +2522,7 @@ async function handleChangePrimary(
 
     const { data: target } = await admin
         .from("SSP_Society_User")
-        .select("user_id, society, unit_flat_number, block, tower, deleted_at")
+        .select("user_id, society, unit_flat_number, flat_type_id, flatTypeRecord:SSP_Flat_Type!flat_type_id(flat_type), block, tower, deleted_at")
         .eq("user_id", targetId)
         .maybeSingle();
 
@@ -2665,6 +2693,7 @@ serve(async (req: Request) => {
 
         return response!;
     } catch (e: unknown) {
+        if (e instanceof ResidentFlatTypeError) return buildError(req, "INVALID_PARAMETERS", e.message, 400);
         const msg = e instanceof Error ? e.message : "Unknown error";
         log("error", "crud-family", "Unhandled", {
             action,

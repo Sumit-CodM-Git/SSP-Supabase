@@ -1,3 +1,4 @@
+import { visitorTimeISTISO } from "../_shared/visitor-time.ts";
 import { hasVisitorName, readVisitorName, findVisitorDraft, isVisitorOtpDraft, canCompleteVisitorDetails, VisitorDraftError } from "../_shared/visitor-drafts.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -1561,8 +1562,8 @@ async function attachSignedURLsToVisitors(
         status: v.visitor_status ?? "",
         approvalStatus: v.visitor_approval_status ?? null,
         preApproved: Boolean(v.pre_approved),
-        checkIn: v.check_in ?? null,
-        checkOut: v.check_out ?? null,
+        checkIn: visitorTimeISTISO(v.check_in),
+        checkOut: visitorTimeISTISO(v.check_out),
         createdAt: v.created_at ?? null,
         flat: v.hosted_by?.unit_flat_number ?? "N/A",
         block: v.hosted_by?.block?.block_name ?? "N/A",

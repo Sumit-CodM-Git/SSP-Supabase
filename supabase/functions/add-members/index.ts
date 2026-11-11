@@ -1,3 +1,4 @@
+import { resolveResidentFlatType, ResidentFlatTypeError } from "../_shared/resident-flat-type.ts";
 import { normalizeParkingSlot } from "../_shared/contact.ts";
 // // deno-lint-ignore-file no-explicit-any no-unused-vars prefer-const
 // import { requireAuth } from "../_shared/auth.ts";
@@ -876,6 +877,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 // TYPES
 // ============================================
 interface MemberData {
+  flatTypeId?: string | null;
+  flatType?: string | null;
   fullName: string;
   parkingSlot?: string | null;
   parking_slot?: string | null;
@@ -1324,6 +1327,7 @@ async function createSocietyUser(
     : normRelationship;
 
   const junctionRecord = {
+    flat_type_id: data.flatTypeId ?? null,
     contact: contactId,
     society: societyId,
     role: normRole ? [normRole] : [memberType.toLowerCase()],
@@ -1677,6 +1681,8 @@ Deno.serve(
       const results: any[] = [];
 
       for (const data of memberData) {
+        const resolvedFlatType = await resolveResidentFlatType(supabaseAdmin, societyId, data);
+        if (resolvedFlatType) { data.flatTypeId = resolvedFlatType.flatTypeId; data.flatType = resolvedFlatType.flatType; }
         if (data.blockId && data.towerId && data.unitFlatNumber) {
           const { data: existingResidents, error: residentErr } =
             await supabaseAdmin
@@ -1718,6 +1724,8 @@ Deno.serve(
 
         // ✅ Response uses NORMALIZED values (what's actually in DB)
         results.push({
+          flatTypeId: data.flatTypeId ?? null,
+          flatType: data.flatType ?? null,
           memberId: memberResult.user_id,
           contactId: contactId,
           fullName: data.fullName,
@@ -1751,6 +1759,7 @@ Deno.serve(
         errorResponse: null,
       });
     } catch (error: any) {
+      if (error instanceof ResidentFlatTypeError) return errorResponse(error.message, 400);
       console.error("❌ add-members error:", error);
       return new Response(
         JSON.stringify({

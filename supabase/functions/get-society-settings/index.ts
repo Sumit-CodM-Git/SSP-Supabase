@@ -27,7 +27,6 @@ interface SocietyRow {
     society_id: string;
     society_name: string | null;
     registration_number: string | null;
-    subscription_plan: string | null;
     address_line1: string | null;
     address_line2: string | null;
     city: string | null;
@@ -263,7 +262,7 @@ async function authorizeAdmin(
     const { data: society, error: societyErr } = await supabase
         .from("SSP_Society")
         .select(
-            "society_id,society_name,registration_number,subscription_plan," +
+            "society_id,society_name,registration_number," +
                 "address_line1,address_line2,city,state,postal_code," +
                 "phone_number,email,total_unit,open_parking,covered_parking," +
                 "parking_slot,amenities,active",
@@ -433,7 +432,6 @@ serve(async (req: Request) => {
                 societyId: society.society_id,
                 societyName: society.society_name ?? "Unnamed Society",
                 registrationNumber: society.registration_number,
-                subscriptionPlan: society.subscription_plan,
                 address: formatAddress(society),
                 phoneNumber: society.phone_number,
                 email: society.email,

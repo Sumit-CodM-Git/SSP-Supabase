@@ -1,3 +1,4 @@
+import { visitorTimeISTISO } from "../_shared/visitor-time.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 // import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -1260,8 +1261,8 @@ function normalizeVisitorData(
     visitorStatus: rawVisitor.visitor_status || null,
     approvalStatus: rawVisitor.visitor_approval_status || null,
     verificationPin: rawVisitor.verification_pin || null,
-    checkIn: rawVisitor.check_in || null,
-    checkOut: rawVisitor.check_out || null,
+    checkIn: visitorTimeISTISO(rawVisitor.check_in),
+    checkOut: visitorTimeISTISO(rawVisitor.check_out),
     isRecurring: rawVisitor.is_recurring || null,
     recurringDays: rawVisitor.recurring_days || null,
     vehicleNumber: rawVisitor.vehicle_number || null,

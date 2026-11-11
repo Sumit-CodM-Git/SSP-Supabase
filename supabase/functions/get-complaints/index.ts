@@ -1,3 +1,4 @@
+import { parseComplaintAssignmentTime } from "../_shared/complaint-time.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 // // ============================================
 // // get-complaints - Get Complaints with Filters, Search & Pagination
@@ -1497,7 +1498,7 @@ Deno.serve(
             type: (comp.complaint_type || "general").replace(/^./, (ch) =>
               ch.toUpperCase()),
             createdAt: comp.created_at || new Date().toISOString(),
-            assignedDateTime: formatToIST(comp.assigned_date_time),
+            assignedDateTime: formatToIST(parseComplaintAssignmentTime(comp.assigned_date_time)),
             completionDateTime: formatToIST(comp.completion_date_time),
             residentDetails,
             assignedAgent: {

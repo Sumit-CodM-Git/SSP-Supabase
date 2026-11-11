@@ -1,3 +1,4 @@
+import { resolveResidentFlatType, residentFlatTypeFields, ResidentFlatTypeError } from "../_shared/resident-flat-type.ts";
 import { normalizeParkingSlot } from "../_shared/contact.ts";
 /* import { requireAuth } from "../_shared/auth.ts";
 import {
@@ -462,6 +463,8 @@ const PGRST_MULTIPLE_ROWS = "PGRST116";
 interface UpdateMemberRequest {
   memberId: string;
   updatedData: {
+    flatTypeId?: string | null;
+    flatType?: string | null;
     vendorName?: string;
     vendorServiceType?: string;
     vendorRating?: number | string;
@@ -837,7 +840,7 @@ Deno.serve(
 
       const { data: memberRecord, error: fetchErr } = await supabaseAdmin
         .from("SSP_Society_User")
-        .select("user_id, contact, society")
+        .select("user_id, contact, society, flat_type_id, flatTypeRecord:SSP_Flat_Type!flat_type_id(flat_type)")
         .eq("user_id", targetId)
         .maybeSingle();
       if (fetchErr) throw fetchErr;
@@ -1039,6 +1042,9 @@ Deno.serve(
         }
       }
 
+      const resolvedFlatType = await resolveResidentFlatType(supabaseAdmin, societyId, updatedData);
+      if (resolvedFlatType) societyUserUpdatePayload.flat_type_id = resolvedFlatType.flatTypeId;
+
       // String fields — coerceOptional preserves 0/false, turns "" → null
       const stringFieldMappings: [keyof UpdateMemberRequest["updatedData"], string][] = [
         ["unitFlatNumber", "unit_flat_number"],
@@ -1227,6 +1233,7 @@ Deno.serve(
           memberId: targetId,
           updatedData: {
             ...updatedData,
+            ...(resolvedFlatType ?? residentFlatTypeFields(memberRecord)),
             ...(savedParkingSlot !== undefined ? { parkingSlot: savedParkingSlot } : {}),
             ...(updatedData.parking_slot !== undefined && savedParkingSlot !== undefined
               ? { parking_slot: savedParkingSlot } : {}),
@@ -1235,6 +1242,7 @@ Deno.serve(
         },
       });
     } catch (error: any) {
+      if (error instanceof ResidentFlatTypeError) return errorResponse(error.message, 400);
       // Structured Postgres errors → 4xx
       const mapped = mapPgError(error);
       if (mapped) {

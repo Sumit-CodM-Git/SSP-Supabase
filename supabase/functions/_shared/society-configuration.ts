@@ -67,8 +67,8 @@ export async function loadSocietyConfiguration(client: any, societyId: string): 
   }
   const [towers, blocks, flatTypes] = await Promise.all([
     all("SSP_Tower", "tower_id,created_at,active,society,block,name,floors,flats_per_floor", "name", "tower_id", true),
-    all("SSP_Block", "block_id,created_at,active,society,tower,block_name", "block_name", "block_id", true),
-    all("SSP_Flat_Type", "flat_type_id,created_at,flat_type,maintenance_charges,society", "flat_type", "flat_type_id"),
+    all("SSP_Block", "block_id,created_at,active,society,tower,block_name", "block_name", "block_id"),
+    all("SSP_Flat_Type", "flat_type_id,created_at,flat_type,maintenance_charges,society", "flat_type", "flat_type_id", true),
   ]);
   return { towers, blocks, flatTypes };
 }

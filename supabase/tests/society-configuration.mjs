@@ -11,7 +11,7 @@ const tables={
  SSP_Society_User:[{user_id:admin,society:A,status:true,role:['admin']},{user_id:resident,society:A,status:true,role:['resident']},{user_id:security,society:A,status:true,role:['security']},{user_id:other,society:B,status:true,role:['resident']}],
  SSP_Tower:[{tower_id:uuid(10),society:A,active:true,name:'Tower Current',block:uuid(11)},{tower_id:uuid(12),society:A,active:false,name:'Inactive Tower'},{tower_id:uuid(13),society:B,active:true,name:'Other Tower'}],
  SSP_Block:[{block_id:uuid(11),society:A,active:true,block_name:'Block Current',tower:uuid(10)},{block_id:uuid(14),society:B,active:true,block_name:'Other Block'}],
- SSP_Flat_Type:[{flat_type_id:uuid(15),society:A,flat_type:'2 BHK',maintenance_charges:500},{flat_type_id:uuid(16),society:B,flat_type:'Other Type'}],
+ SSP_Flat_Type:[{flat_type_id:uuid(15),society:A,active:true,flat_type:'2 BHK',maintenance_charges:500},{flat_type_id:uuid(16),society:B,active:true,flat_type:'Other Type'}],
  SSP_Picklist_Config:[{table_name:'SSP_Flat_Type',field_name:'flat_type',value:'GLOBAL TYPE',label:'GLOBAL TYPE',language:'en',is_active:true},{table_name:'SSP_Society',field_name:'block',value:'stale',label:'Stale Block',language:'en',is_active:true}],
  SSP_Picklist_Field_Meta:[],SSP_Society_Staff:[],SSP_Facility:[],
 };
@@ -42,6 +42,23 @@ function load(name){let handler;const source=stripTypeScriptTypes(readFileSync(n
 const picklists=load('get-picklists'),settings=load('get-society-settings');
 const request=(requesterId=admin,extras={})=>({societyRegistrationNumber:'A',requesterId,...extras});
 const first=await picklists(request());assert.equal(first.status,200);
+tables.SSP_Flat_Type.push({flat_type_id:uuid(18),society:A,active:false,flat_type:'Inactive Type'});
+const retired=await picklists(request());
+assert.deepEqual(retired.body.societyConfiguration.flatTypes,first.body.societyConfiguration.flatTypes);
+assert.deepEqual(retired.body.flatTypeCatalog,first.body.flatTypeCatalog);
+tables.SSP_Flat_Type.pop();
+tables.SSP_Block.push({block_id:uuid(17),society:A,active:false,block_name:'Inactive Block'});
+const withInactive=await picklists(request());
+assert.deepEqual(withInactive.body.societyConfiguration.blocks.map(row=>row.blockId),[uuid(11),uuid(17)]);
+assert.deepEqual(withInactive.body.picklistsByTable.SSP_Society.block.options.map(row=>row.value),[uuid(11),uuid(17)]);
+assert.notEqual(withInactive.body.configurationVersion,first.body.configurationVersion);
+const settingsWithInactive=await settings({societyRegistrationNumber:'A',adminId:admin});
+assert.equal(settingsWithInactive.status,200);
+assert.deepEqual(settingsWithInactive.body.data.blocks.map(row=>({id:row.blockId,active:row.active})),[
+ {id:uuid(11),active:true},{id:uuid(17),active:false},
+]);
+assert.deepEqual(settingsWithInactive.body.data.societyConfiguration.blocks,withInactive.body.societyConfiguration.blocks);
+tables.SSP_Block.pop();
 assert.match(first.headers.get('cache-control'),/private.*no-cache/);assert.ok(!first.headers.get('cache-control').includes('public'));
 assert.equal(first.body.societyConfiguration.towers.length,1);
 assert.deepEqual(first.body.picklistsByTable.SSP_Flat_Type.flat_type.options,[{value:'2 BHK',label:'2 BHK'}]);
@@ -74,7 +91,9 @@ assert.equal(updated.body.picklistsByTable.SSP_Flat_Type.flat_type.options[0].la
 // Deactivation/deletion must clear stale options rather than restoring global defaults.
 tables.SSP_Tower[0].active=false;tables.SSP_Block[0].active=false;tables.SSP_Flat_Type=tables.SSP_Flat_Type.filter(row=>row.society!==A);
 const empty=await picklists(request(),{'if-none-match':updated.headers.get('etag')});assert.equal(empty.status,200);
-for(const field of ['block','tower','flat_type'])assert.deepEqual(empty.body.picklistsByTable.SSP_Society[field].options,[]);
+for(const field of ['tower','flat_type'])assert.deepEqual(empty.body.picklistsByTable.SSP_Society[field].options,[]);
+assert.deepEqual(empty.body.picklistsByTable.SSP_Society.block.options,[{value:uuid(11),label:'Renamed Block'}]);
+assert.deepEqual(empty.body.societyConfiguration.blocks.map(row=>row.blockId),[uuid(11)]);
 assert.deepEqual(empty.body.picklistsByTable.SSP_Flat_Type.flat_type.options,[]);
 assert.equal((await picklists({...request(other),societyRegistrationNumber:'B'},{'if-none-match':empty.headers.get('etag')})).status,200);
 assert.equal((await picklists(request(other))).status,403);

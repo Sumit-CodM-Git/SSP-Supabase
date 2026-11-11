@@ -1,3 +1,4 @@
+import { visitorTimeISTISO } from "../_shared/visitor-time.ts";
 // import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // const corsHeaders = {
@@ -1671,8 +1672,8 @@ Deno.serve(
           vehicleNumber: raw.vehicle_number || null,
           idProofType: raw.id_proof_type || null,
           gateNumber: raw.gate_no || null,
-          checkInTime: raw.check_in || null,
-          checkOutTime: raw.check_out || null,
+          checkInTime: visitorTimeISTISO(raw.check_in),
+          checkOutTime: visitorTimeISTISO(raw.check_out),
           imageUrl,
           createdAt: raw.created_at || new Date().toISOString(),
         });
