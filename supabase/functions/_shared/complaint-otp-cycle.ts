@@ -30,7 +30,10 @@ export async function runComplaintOtpCycle(
   }});
   const fail = (message: string, code = 400) => ({ status: code, message });
   if (stage === "END" && ["resolved", "completed"].includes(status) && c.end_otp_verified_at) return success(true);
-  if (!["assigned", "in_progress"].includes(status)) return fail(`Cannot process ${stage} OTP for a complaint with status '${c.status}'.`);
+  const startEligible = ["assigned", "in_progress", "pending"].includes(status);
+  if (stage === "START" ? !startEligible : !["assigned", "in_progress"].includes(status)) {
+    return fail(`Cannot process ${stage} OTP for a complaint with status '${c.status}'.`);
+  }
   // A completed cycle reopened without resetting its OTP fields must start fresh.
   const staleEnd = Boolean(c.end_otp_verified_at);
   if (stage === "START" && status === "in_progress" && c.start_otp_verified_at && !staleEnd) return success(true);

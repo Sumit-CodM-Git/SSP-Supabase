@@ -32,6 +32,11 @@ assert.equal((await call('END','101126')).status,200);assert.equal(row.status,'r
 row.status='assigned';assert.equal((await call('START')).status,200);assert.equal(row.start_otp_verified_at,null);assert.equal(row.end_otp_verified_at,null);
 assert.equal((await call('END')).status,400);
 assert.equal((await call('START','101126')).status,200);assert.equal((await call('END')).status,200);assert.equal((await call('END','101126')).status,200);
+// A previously verified START left in Pending can begin a fresh work cycle.
+row={...fresh(),status:'Pending',start_otp:'101126',start_otp_generated_at:'2026-11-10T08:00:00Z',start_otp_verified_at:'2026-11-10T08:01:00Z'};
+assert.equal((await call('START')).status,200);assert.equal(row.start_otp_verified_at,null);assert.equal(row.status,'Pending');
+assert.equal((await call('START','101126')).data.status,'in_progress');assert.equal(row.status,'in_progress');
+assert.equal((await call('END')).status,200);assert.equal((await call('END','101126')).data.status,'resolved');
 for(const status of ['cancelled','rejected','new']){row={...fresh(),status};assert.equal((await call('START')).status,400);assert.equal((await call('END')).status,400);}
 row=fresh();fail=true;assert.equal((await call('START')).status,500);fail=false;race=true;assert.equal((await call('START')).status,409);race=false;
 console.log('Complaint OTP cycle passed: START→END, required start, retries, wrong/expired OTP, completed retries, stale reopened state, restart, closed states, DB failures, races.');

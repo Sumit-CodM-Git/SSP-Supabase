@@ -69,13 +69,19 @@ export async function isAssignedVendor(params: {
 
   const { data, error } = await supabaseAdmin
     .from("SSP_Non_Society_User")
-    .select("non_society_user_id")
+    .select("non_society_user_id, role, phone_number, deleted_at")
     .eq("non_society_user_id", params.complaintVendorId)
-    .eq("phone_number", params.callerPhone)
     .maybeSingle();
 
   if (error) return false;
-  return !!data;
+  const callerPhone = normalizePhone(params.callerPhone);
+  return Boolean(
+    data &&
+      !data.deleted_at &&
+      String(data.role ?? "").trim().toLowerCase() === "vendor" &&
+      callerPhone?.length === 10 &&
+      normalizePhone(data.phone_number) === callerPhone,
+  );
 }
 
 /**

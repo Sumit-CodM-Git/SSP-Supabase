@@ -1968,19 +1968,10 @@ async function handleView(
         }
     }
 
-    const sortBy = body.sort?.by ?? "ownershipType";
-    const ascending = body.sort?.dir !== "desc";
-
-    if (sortBy === "name") {
-        q = q.order("name", { ascending, foreignTable: "SSP_Contact" });
-    } else if (sortBy === "createdAt") {
-        q = q.order("created_at", { ascending });
-    } else if (sortBy === "relationship") {
-        q = q.order("relationship", { ascending, nullsFirst: false });
-    } else {
-        q = q.order("user_ownership_type", { ascending: true });
-        q = q.order("created_at", { ascending: false });
-    }
+    // Keep the primary resident first, then list other family residents from
+    // oldest to newest. The ordering must be stable across pages.
+    q = q.order("user_ownership_type", { ascending: true, nullsFirst: false });
+    q = q.order("created_at", { ascending: true, nullsFirst: false });
 
     q = q.range(from, to);
 
@@ -2068,7 +2059,7 @@ async function handleView(
             blockId: m.block ?? null,
             ...residentFlatTypeFields(m),
             flatNumber: m.unit_flat_number ?? "",
-            createdAt: cObj.created_at ?? m.created_at ?? null,
+            createdAt: m.created_at ?? cObj.created_at ?? null,
         };
     });
 

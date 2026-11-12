@@ -378,6 +378,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { fetchOrder, verifyWebhookSignature } from "../_shared/razorpay.ts";
 import { logger } from "../_shared/logger.ts";
+import { resolveBlockForOrder } from "../_shared/subscription-utils.ts";
 
 interface RazorpayWebhookEvent {
   entity: string;
@@ -542,7 +543,7 @@ async function handlePaymentCaptured(
   const ownerUserId = notes.user_id;
   const society = notes.society;
   const tower = notes.tower || null;
-  const block = notes.block || null;
+  const orderBlock = notes.block || null;
   const flatNumber = notes.flat_number;
   const planCode = notes.plan_code;
   const planPriceId = notes.plan_price_id || null;
@@ -553,6 +554,12 @@ async function handlePaymentCaptured(
   if (!society || !flatNumber || !planCode || !ownerUserId) {
     throw new Error("payment.captured: order notes missing required fields");
   }
+  const block = await resolveBlockForOrder(supabase, ownerUserId, {
+    society,
+    tower,
+    block: orderBlock,
+    flatNumber,
+  });
 
   // ─────────────────────────────────────────────
   // Look up plan
