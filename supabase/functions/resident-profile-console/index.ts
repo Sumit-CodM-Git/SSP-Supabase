@@ -1,6 +1,10 @@
 import { resolveResidentFlatType, residentFlatTypeFields, ResidentFlatTypeError } from "../_shared/resident-flat-type.ts";
-import { contactParkingSlot } from "../_shared/contact.ts";
-import { normalizeParkingSlot } from "../_shared/contact.ts";
+import {
+  CONTACT_PHONE_DUPLICATE_MESSAGE,
+  contactParkingSlot,
+  contactPhoneAlreadyExists,
+  normalizeParkingSlot,
+} from "../_shared/contact.ts";
 import { type AuthContext, requireAuth } from "../_shared/auth.ts";
 import {
   corsHeaders,
@@ -1415,6 +1419,20 @@ Deno.serve(
         // ---- Apply updates with rollback ----
         let contactUpdated = false;
         const previousContactData: Record<string, unknown> = {};
+
+        if (
+          typeof contactUpdates.phone === "string" &&
+          contactUpdates.phone &&
+          targetContactId &&
+          await contactPhoneAlreadyExists(
+            supabaseAdmin,
+            societyContext.society_id,
+            contactUpdates.phone,
+            targetContactId,
+          )
+        ) {
+          return errorResponse(CONTACT_PHONE_DUPLICATE_MESSAGE, 400);
+        }
 
         if (Object.keys(contactUpdates).length > 0 && targetContactId) {
           const { data: prev } = await supabaseAdmin

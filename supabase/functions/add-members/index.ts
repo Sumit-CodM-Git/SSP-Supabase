@@ -1,5 +1,9 @@
 import { resolveResidentFlatType, ResidentFlatTypeError } from "../_shared/resident-flat-type.ts";
-import { normalizeParkingSlot } from "../_shared/contact.ts";
+import {
+  CONTACT_PHONE_DUPLICATE_MESSAGE,
+  contactPhoneAlreadyExists,
+  normalizeParkingSlot,
+} from "../_shared/contact.ts";
 // // deno-lint-ignore-file no-explicit-any no-unused-vars prefer-const
 // import { requireAuth } from "../_shared/auth.ts";
 // import {
@@ -1122,13 +1126,12 @@ function validateMemberData(
 }
 
 // ============================================
-// HELPER: Create or Get Contact (For Non-Vendors Only)
+// HELPER: Create Contact (For Non-Vendors Only)
 // ============================================
-async function createOrGetContact(
+async function createContact(
   supabaseAdmin: any,
   data: MemberData,
   societyId: string,
-  existingContactMap: Map<string, any>,
   picklists: PicklistMap,
 ): Promise<{
   contactId: string;
@@ -1140,10 +1143,6 @@ async function createOrGetContact(
     parkingSlot: string | null;
   };
 }> {
-  const namePhoneKey = `${data.fullName}_${data.phone}`;
-  const idProofKey = data.idProofNumber
-    ? String(data.idProofNumber).trim().toUpperCase()
-    : "";
   const phoneOnlyKey = data.phone ? String(data.phone).trim() : "";
 
   const normGender = resolvePicklistValue(
@@ -1173,49 +1172,6 @@ async function createOrGetContact(
     vehicleType: normVehicleType,
     parkingSlot: parkingSlot ?? null,
   };
-
-  const matchedContact = existingContactMap.get(namePhoneKey) ||
-    (idProofKey ? existingContactMap.get(idProofKey) : null) ||
-    (phoneOnlyKey ? existingContactMap.get(phoneOnlyKey) : null);
-
-  if (matchedContact) {
-    normalized.parkingSlot = parkingSlot === undefined ? matchedContact.parking_slot ?? null : parkingSlot;
-    console.log(`📝 Updating existing contact: ${matchedContact.contact_id}`);
-
-    const updatePayload: any = {};
-    if (parkingSlot !== undefined) updatePayload.parking_slot = parkingSlot;
-    if (data.email) updatePayload.email = data.email;
-    if (normGender) updatePayload.gender = normGender;
-    if (data.occupation) updatePayload.occupation = data.occupation;
-    if (data.whatsappPhone) updatePayload.whatsapp_phone = data.whatsappPhone;
-    if (data.emergencyPhone) {
-      updatePayload.emergency_phone = data.emergencyPhone;
-    }
-    if (normIdProofType) updatePayload.id_proof_type = normIdProofType;
-    if (data.idProofNumber) {
-      updatePayload.id_proof_number = data.idProofNumber.trim().toUpperCase();
-    }
-    if (normVehicleType) updatePayload.vehicle_type = normVehicleType;
-    if (data.vehicleRegistrationNumber) {
-      updatePayload.vehicle_registration_number =
-        data.vehicleRegistrationNumber;
-    }
-    if (data.fullName) updatePayload.name = data.fullName;
-    if (data.phone) updatePayload.phone = data.phone;
-    updatePayload.society = societyId;
-
-    const { error: updateErr } = await supabaseAdmin
-      .from("SSP_Contact")
-      .update(updatePayload)
-      .eq("contact_id", matchedContact.contact_id);
-
-    if (updateErr) {
-      console.error("❌ Failed to update contact:", updateErr);
-      throw new Error(`Failed to update contact: ${updateErr.message}`);
-    }
-
-    return { contactId: matchedContact.contact_id, isNew: false, normalized };
-  }
 
   const newContactPayload = {
     parking_slot: parkingSlot ?? null,
@@ -1647,35 +1603,24 @@ Deno.serve(
       // NON-VENDOR
       console.log(`👥 Creating ${memberType}(s) with contact`);
 
-      const phoneSet: string[] = [];
-      const fullNameSet: string[] = [];
+      const phoneSet = new Set<string>();
 
       for (const m of memberData) {
-        if (m.phone) phoneSet.push(String(m.phone).trim());
-        if (m.fullName) fullNameSet.push(String(m.fullName).trim());
+        const phone = String(m.phone).trim();
+        if (phoneSet.has(phone)) {
+          return errorResponse(CONTACT_PHONE_DUPLICATE_MESSAGE, 400);
+        }
+        phoneSet.add(phone);
       }
 
-      const { data: existingContacts, error: contactFetchErr } =
-        await supabaseAdmin
-          .from("SSP_Contact")
-          .select("parking_slot, contact_id, name, phone, id_proof_number")
-          .in("name", fullNameSet)
-          .in("phone", phoneSet);
-
-      if (contactFetchErr) throw contactFetchErr;
-
-      const existingContactMap = new Map();
-      if (existingContacts) {
-        for (const c of existingContacts) {
-          existingContactMap.set(`${c.name}_${c.phone}`, c);
-          if (c.id_proof_number) {
-            existingContactMap.set(
-              String(c.id_proof_number).trim().toUpperCase(),
-              c,
-            );
-          }
-          if (c.phone) existingContactMap.set(String(c.phone).trim(), c);
-        }
+      if (
+        await contactPhoneAlreadyExists(
+          supabaseAdmin,
+          societyId,
+          [...phoneSet],
+        )
+      ) {
+        return errorResponse(CONTACT_PHONE_DUPLICATE_MESSAGE, 400);
       }
 
       const results: any[] = [];
@@ -1705,11 +1650,10 @@ Deno.serve(
         }
 
         const { contactId, isNew, normalized: contactNorm } =
-          await createOrGetContact(
+          await createContact(
             supabaseAdmin,
             data,
             societyId,
-            existingContactMap,
             picklists,
           );
 

@@ -3,7 +3,7 @@ import {resolveResidentFlatType,residentFlatTypeFields,ResidentFlatTypeError} fr
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {stripTypeScriptTypes} from 'node:module';
-import {normalizeParkingSlot} from '../functions/_shared/contact.ts';
+import {CONTACT_PHONE_DUPLICATE_MESSAGE,contactPhoneAlreadyExists,normalizeParkingSlot} from '../functions/_shared/contact.ts';
 const contacts=[];
 const savedMembers=[];
 const flatId="00000000-0000-4000-8000-000000000001";
@@ -33,42 +33,60 @@ class Query {
 }
 let handler;
 const source=stripTypeScriptTypes(readFileSync(new URL('../functions/add-members/index.ts',import.meta.url),'utf8').replace(/^import\s[\s\S]*?from\s+["'][^"']+["'];?\s*$/gm,''));
-new Function('Deno','createClient','requireAuth','corsHeaders','errorResponse','successResponse','parseRequestBody','normalizeParkingSlot','resolveResidentFlatType','residentFlatTypeFields','ResidentFlatTypeError',source)
+new Function('Deno','createClient','requireAuth','corsHeaders','errorResponse','successResponse','parseRequestBody','normalizeParkingSlot','resolveResidentFlatType','residentFlatTypeFields','ResidentFlatTypeError','CONTACT_PHONE_DUPLICATE_MESSAGE','contactPhoneAlreadyExists',source)
   ({env:{get:()=>''},serve:fn=>handler=fn},()=>({from:table=>new Query(table)}),fn=>fn,{},
     (message,status=400)=>new Response(JSON.stringify({message}),{status}),
-    data=>new Response(JSON.stringify({success:true,data})),req=>req.json(),normalizeParkingSlot,resolveResidentFlatType,residentFlatTypeFields,ResidentFlatTypeError);
+    data=>new Response(JSON.stringify({success:true,data})),req=>req.json(),normalizeParkingSlot,resolveResidentFlatType,residentFlatTypeFields,ResidentFlatTypeError,CONTACT_PHONE_DUPLICATE_MESSAGE,contactPhoneAlreadyExists);
 const member={fullName:'Parking Test',phone:'9000000000',idProofType:'PAN Card',idProofNumber:'ABCDE1234F'};
-async function run(changes={}) {
-  const response=await handler(new Request('https://test',{method:'POST',body:JSON.stringify({registrationNumber:'TEST',memberType:'resident',memberData:[{...member,...changes}]})}),{user:{id:'admin'}});
+let nextPhone=9000000000;
+async function runMany(memberData) {
+  const response=await handler(new Request('https://test',{method:'POST',body:JSON.stringify({registrationNumber:'TEST',memberType:'resident',memberData})}),{user:{id:'admin'}});
   return {status:response.status,body:await response.json()};
+}
+async function run(changes={}) {
+  const requestMember={...member,...changes};
+  if (!Object.hasOwn(changes,'phone')) requestMember.phone=String(nextPhone++);
+  return runMany([requestMember]);
 }
 let response=await run({parkingSlot:'  P-101  '});
 assert.equal(response.status,200);
 assert.equal(response.body.data.memberCreated[0].parkingSlot,'P-101');
 assert.equal(contacts[0].parking_slot,'P-101');
 assert.equal(contacts.length,1);
-response=await run();
-assert.equal(response.body.data.memberCreated[0].parkingSlot,'P-101');
-assert.equal(contacts[0].parking_slot,'P-101');
+const memberCount=savedMembers.length;
+response=await run({fullName:'Second Test',phone:member.phone});
+assert.equal(response.status,400);
+assert.equal(response.body.message,'Contact record already present, use a different phone.');
+assert.equal(contacts.length,1);
+assert.equal(savedMembers.length,memberCount);
+response=await runMany([
+  {...member,fullName:'Batch One',phone:'9000000010'},
+  {...member,fullName:'Batch Two',phone:'9000000010'},
+]);
+assert.equal(response.status,400);
+assert.equal(response.body.message,'Contact record already present, use a different phone.');
+assert.equal(contacts.length,1);
+assert.equal(savedMembers.length,memberCount);
 response=await run({parking_slot:'P-102'});
 assert.equal(response.body.data.memberCreated[0].parkingSlot,'P-102');
-assert.equal(contacts[0].parking_slot,'P-102');
+assert.equal(contacts[1].parking_slot,'P-102');
 response=await run({parkingSlot:'P-103',parking_slot:'IGNORED'});
 assert.equal(response.body.data.memberCreated[0].parkingSlot,'P-103');
+assert.equal(contacts[2].parking_slot,'P-103');
 for (const value of [null,'  ']) {
  response=await run({parkingSlot:value});
+ assert.equal(response.status,200);
  assert.equal(response.body.data.memberCreated[0].parkingSlot,null);
- assert.equal(contacts[0].parking_slot,null);
+ assert.equal(contacts.at(-1).parking_slot,null);
 }
 const count=contacts.length;
 response=await run({parkingSlot:101});
 assert.equal(response.status,400);
 assert.equal(contacts.length,count);
-assert.equal(contacts[0].parking_slot,null);
-response=await run({fullName:'Second Test',phone:'9000000001',parking_slot:'P-104'});
+response=await run({fullName:'Second Test',parking_slot:'P-104'});
 assert.equal(response.body.data.memberCreated[0].parkingSlot,'P-104');
-assert.equal(contacts[1].parking_slot,'P-104');
-console.log('Create-member parking tests passed: create, response, aliases, preserve, clear and invalid-input validation.');
+assert.equal(contacts.at(-1).parking_slot,'P-104');
+console.log('Create-member tests passed: duplicate-phone rejection, batch validation and parking behavior.');
 
 response=await run({flatTypeId:flatId});assert.equal(response.status,200);assert.equal(savedMembers.at(-1).flat_type_id,flatId);assert.equal(response.body.data.memberCreated[0].flatType,'2 BHK');
 response=await run({flatTypeId:null});assert.equal(response.status,200);assert.equal(savedMembers.at(-1).flat_type_id,null);assert.equal(response.body.data.memberCreated[0].flatType,null);

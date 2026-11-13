@@ -1,4 +1,8 @@
-import { normalizeParkingSlot } from "../_shared/contact.ts";
+import {
+  CONTACT_PHONE_DUPLICATE_MESSAGE,
+  contactPhoneAlreadyExists,
+  normalizeParkingSlot,
+} from "../_shared/contact.ts";
 /*import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import Papa from "https://esm.sh/papaparse@5.4.1"
@@ -513,8 +517,22 @@ const parseResult = Papa.parse(fileText, {
             const parkingSlot = normalizeParkingSlot(row.parking_slot !== undefined ? row.parking_slot : row.parkingSlot);
             if (parkingSlot !== undefined) contactPayload.parking_slot = parkingSlot;
 
-            if (row.contact_id) {
-              contactPayload.contact_id = sanitizeString(row.contact_id);
+            const contactId = row.contact_id
+              ? sanitizeString(row.contact_id)
+              : undefined;
+            if (
+              await contactPhoneAlreadyExists(
+                supabaseAdmin,
+                targetSocietyId,
+                phoneClean,
+                contactId,
+              )
+            ) {
+              throw new Error(CONTACT_PHONE_DUPLICATE_MESSAGE);
+            }
+
+            if (contactId) {
+              contactPayload.contact_id = contactId;
             }
 
             const { data: contactData, error: contactErr } = await supabaseAdmin

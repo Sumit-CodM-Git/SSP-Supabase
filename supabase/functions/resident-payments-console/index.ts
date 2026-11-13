@@ -1,4 +1,7 @@
-import { receiptExists } from "../_shared/receipt-storage.ts";
+import {
+  createReceiptSignedUrl,
+  receiptExists,
+} from "../_shared/receipt-storage.ts";
 import { requireAuth, type AuthContext } from "../_shared/auth.ts";
 import {
   corsHeaders,
@@ -96,41 +99,6 @@ function firstOrNull<T>(arr: T | T[] | null | undefined): T | null {
   if (!arr) return null;
   if (Array.isArray(arr)) return arr.length > 0 ? arr[0] : null;
   return arr;
-}
-
-function extractStorageKey(path: string): string | null {
-  if (!path) return null;
-  const raw = path.trim();
-  const publicMarker = `/storage/v1/object/public/${BUCKET_NAME}/`;
-  const signedMarker = `/storage/v1/object/sign/${BUCKET_NAME}/`;
-  if (raw.includes(publicMarker)) return raw.split(publicMarker)[1].split("?")[0];
-  if (raw.includes(signedMarker)) return raw.split(signedMarker)[1].split("?")[0];
-  if (raw.includes(".amazonaws.com/")) return raw.split(".amazonaws.com/")[1].split("?")[0];
-  return raw.split("?")[0];
-}
-
-function buildPublicUrl(s3Path: string | null): string {
-  if (!s3Path) return "";
-  const raw = s3Path.trim();
-  if (!raw) return "";
-  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
-  const clean = raw.startsWith("/") ? raw.slice(1) : raw;
-  return `${Deno.env.get("SUPABASE_URL") ?? ""}/storage/v1/object/public/${BUCKET_NAME}/${clean}`;
-}
-
-async function signOrPublic(s3Path: string | null): Promise<string> {
-  if (!s3Path) return "";
-  const key = extractStorageKey(s3Path);
-  if (!key) return buildPublicUrl(s3Path);
-  try {
-    const { data, error } = await supabaseAdmin.storage
-      .from(BUCKET_NAME)
-      .createSignedUrl(key, SIGNED_URL_EXPIRY);
-    if (error || !data?.signedUrl) return buildPublicUrl(s3Path);
-    return data.signedUrl;
-  } catch {
-    return buildPublicUrl(s3Path);
-  }
 }
 
 // ============================================
@@ -283,10 +251,14 @@ Deno.serve(
         const previousStatus = String(payment.payment_status ?? "").trim().toUpperCase();
         const needsReview = ["UNPAID", "REJECTED", ""].includes(previousStatus);
         if (needsReview) {
-          const { error: updateError } = await supabaseAdmin.from("SSP_Payment")
+          let updateQuery = supabaseAdmin.from("SSP_Payment")
             .update({ payment_status: "UNDER REVIEW" })
-            .eq("pay_rec_id", payment.pay_rec_id).eq("society_user", targetResidentId)
-            .eq("payment_status", payment.payment_status);
+            .eq("pay_rec_id", payment.pay_rec_id)
+            .eq("society_user", targetResidentId);
+          updateQuery = payment.payment_status === null
+            ? updateQuery.is("payment_status", null)
+            : updateQuery.eq("payment_status", payment.payment_status);
+          const { error: updateError } = await updateQuery;
           if (updateError) throw updateError;
         }
         return successResponse(asPayload({
@@ -364,26 +336,6 @@ Deno.serve(
           : "";
         const paymentRecordUuid = currentPayment.pay_rec_id;
 
-        const needsUnderReview =
-          statusVal === "UNPAID" || statusVal === "REJECTED" || statusVal === "";
-
-        if (needsUnderReview) {
-          const { error: updateErr } = await supabaseAdmin
-            .from("SSP_Payment")
-            .update({ payment_status: "UNDER REVIEW" })
-            .eq("pay_rec_id", paymentRecordUuid);
-
-          if (updateErr) {
-            logger.error({
-              level: "error",
-              timestamp: new Date().toISOString(),
-              action: "resident_payments_console_submit_status_error",
-              error: updateErr.message,
-            });
-            throw new Error(`Payment status update failed: ${updateErr.message}`);
-          }
-        }
-
         // ---- Optional receipt upload ----
         let uploadPresignedUrl: string | null = null;
         let documentUuid: string | null = null;
@@ -400,19 +352,19 @@ Deno.serve(
               .from(BUCKET_NAME)
               .createSignedUploadUrl(targetObjectKey);
 
-          if (storageLinkErr) {
+          if (storageLinkErr || !uploadPayload?.signedUrl) {
             logger.error({
               level: "error",
               timestamp: new Date().toISOString(),
               action: "resident_payments_console_submit_storage_error",
-              error: storageLinkErr.message,
+              error: storageLinkErr?.message ?? "No signed upload URL returned.",
             });
             throw new Error(
-              `Storage URL generation failed: ${storageLinkErr.message}`,
+              `Storage URL generation failed: ${storageLinkErr?.message ?? "No signed upload URL returned."}`,
             );
           }
 
-          uploadPresignedUrl = uploadPayload?.signedUrl ?? null;
+          uploadPresignedUrl = uploadPayload.signedUrl;
           const fullS3Path = `${Deno.env.get("SUPABASE_URL") ?? ""}/storage/v1/object/public/${BUCKET_NAME}/${targetObjectKey}`;
 
           const { data: newDoc, error: docInsertErr } = await supabaseAdmin
@@ -447,10 +399,14 @@ Deno.serve(
           documentUuid = newDoc.document_id;
 
           // FIX SSP-0013: Update the payment record so the admin can see it
-          await supabaseAdmin
+          const { error: receiptUpdateErr } = await supabaseAdmin
             .from("SSP_Payment")
             .update({ receipt_url: fullS3Path })
-            .eq("pay_rec_id", paymentRecordUuid);
+            .eq("pay_rec_id", paymentRecordUuid)
+            .eq("society_user", targetResidentId);
+          if (receiptUpdateErr) {
+            throw new Error(`Receipt reference update failed: ${receiptUpdateErr.message}`);
+          }
         }
 
         logger.info({
@@ -469,7 +425,8 @@ Deno.serve(
             paymentSubmission: {
               submitted: true,
               paymentRecordId: paymentRecordUuid,
-              status: needsUnderReview ? "UNDER REVIEW" : statusVal,
+              status: statusVal,
+              receiptUploadStatus: uploadPresignedUrl ? "pending_upload" : "not_provided",
             },
             uploadUrl: uploadPresignedUrl,
             documentId: documentUuid,
@@ -602,7 +559,9 @@ Deno.serve(
 
         // ---- Sign receipt URLs ----
         const signedReceipts = await Promise.all(
-          rawPayments.map((p) => signOrPublic(p.receipt_url)),
+          rawPayments.map((p) =>
+            createReceiptSignedUrl(supabaseAdmin, p.receipt_url, SIGNED_URL_EXPIRY)
+          ),
         );
 
         // ---- Map DTO ----

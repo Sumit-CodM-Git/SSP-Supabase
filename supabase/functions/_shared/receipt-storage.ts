@@ -24,6 +24,27 @@ export async function receiptExists(client: any, value: string): Promise<boolean
   return (data ?? []).some((file: any) => file.name === name && file.id && Number(file.metadata?.size) > 0);
 }
 
+export async function createReceiptSignedUrl(
+  client: any,
+  value: string | null,
+  expiresIn = 900,
+): Promise<string | null> {
+  if (!value?.trim()) return null;
+
+  const key = receiptStorageKey(value);
+  if (!key) return null;
+
+  if (!await receiptExists(client, value)) return null;
+
+  const { data, error } = await client.storage
+    .from(BUCKET)
+    .createSignedUrl(key, expiresIn);
+  if (error || !data?.signedUrl) {
+    throw new Error(`Receipt signing failed: ${error?.message ?? "No signed URL returned"}`);
+  }
+  return data.signedUrl;
+}
+
 export async function resolveReceiptImage(client: any, values: unknown[]): Promise<{
   receiptImageUrl: string | null;
   receiptUploadStatus: "uploaded" | "missing" | "not_provided" | "unverified";
@@ -33,19 +54,12 @@ export async function resolveReceiptImage(client: any, values: unknown[]): Promi
   if (!paths.length) return { receiptImageUrl: null, receiptUploadStatus: "not_provided" };
   let fallback: string | null = null;
   for (const path of paths) {
-    const url = /^https?:\/\//i.test(path) ? path
-      : `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/${BUCKET}/${path}`;
-    try {
-      // Preserve legacy external URLs; local storage cannot verify them.
-      if (!receiptStorageKey(path)) {
-        fallback ??= url;
-        continue;
-      }
-      if (await receiptExists(client, path)) return { receiptImageUrl: url, receiptUploadStatus: "uploaded" };
-    } catch {
-      // Storage outages must not prevent admins from retrieving bookings.
-      fallback ??= url;
+    if (!receiptStorageKey(path)) {
+      fallback ??= path;
+      continue;
     }
+    const signedUrl = await createReceiptSignedUrl(client, path);
+    if (signedUrl) return { receiptImageUrl: signedUrl, receiptUploadStatus: "uploaded" };
   }
   return fallback ? { receiptImageUrl: fallback, receiptUploadStatus: "unverified" }
     : { receiptImageUrl: null, receiptUploadStatus: "missing" };

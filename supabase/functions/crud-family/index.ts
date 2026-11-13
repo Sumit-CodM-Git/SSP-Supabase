@@ -1,6 +1,10 @@
 import { resolveResidentFlatType, residentFlatTypeFields, ResidentFlatTypeError } from "../_shared/resident-flat-type.ts";
-import { contactParkingSlot } from "../_shared/contact.ts";
-import { normalizeParkingSlot } from "../_shared/contact.ts";
+import {
+  CONTACT_PHONE_DUPLICATE_MESSAGE,
+  contactParkingSlot,
+  contactPhoneAlreadyExists,
+  normalizeParkingSlot,
+} from "../_shared/contact.ts";
 // // deno-lint-ignore-file no-import-prefix no-explicit-any
 // // ============================================
 // // crud-family — Merged CRUD for family members
@@ -1727,9 +1731,7 @@ async function handleCreate(
         );
     }
 
-    // ---- PARALLEL: idempotency + flat members + existing contact ----
-    // We fetch the flat members (for duplicate detection) and the existing
-    // contact (for reuse) at the same time. All 3 queries fire together.
+    // ---- PARALLEL: idempotency + flat members + duplicate contact check ----
     const tChecks = Date.now();
 
     const idemPromise = body.idempotencyKey
@@ -1751,17 +1753,16 @@ async function handleCreate(
         .eq("unit_flat_number", ctx.callerFlat)
         .is("deleted_at", null);
 
-    const existingContactPromise = admin
-        .from("SSP_Contact")
-        .select("contact_id, parking_slot")
-        .eq("society", ctx.callerSocietyId)
-        .eq("phone", phone)
-        .maybeSingle();
+    const duplicateContactPromise = contactPhoneAlreadyExists(
+        admin,
+        ctx.callerSocietyId,
+        phone,
+    );
 
-    const [idemRes, flatMembersRes, existingContactRes] = await Promise.all([
+    const [idemRes, flatMembersRes, duplicateContactExists] = await Promise.all([
         idemPromise,
         flatMembersPromise,
-        existingContactPromise,
+        duplicateContactPromise,
     ]);
 
     console.log(
@@ -1782,6 +1783,15 @@ async function handleCreate(
         });
     }
 
+    if (duplicateContactExists) {
+          return buildError(
+              req,
+              "DUPLICATE_CONTACT_PHONE",
+              CONTACT_PHONE_DUPLICATE_MESSAGE,
+              400,
+          );
+    }
+
     // Duplicate phone within same flat
     const dup = (flatMembersRes.data ?? []).find((u) => {
         const c = u.contact as { phone?: string } | { phone?: string }[] | null;
@@ -1792,8 +1802,8 @@ async function handleCreate(
     if (dup) {
         return buildError(
             req,
-            "DUPLICATE_MEMBER",
-            `A member with phone ${phone} already exists in this flat.`,
+            "DUPLICATE_CONTACT_PHONE",
+            CONTACT_PHONE_DUPLICATE_MESSAGE,
             400,
         );
     }
@@ -1810,53 +1820,41 @@ async function handleCreate(
         resolvedFlatType = {flatTypeId:null, flatType:null};
     }
 
-    // ---- Contact: reuse or create ----
-    let contactId: string;
+    // ---- Create contact after the society-scoped duplicate check ----
+    const { data: newContact, error: cErr } = await admin
+        .from("SSP_Contact")
+        .insert({
+            name,
+            phone,
+            society: ctx.callerSocietyId,
+            email: cleanText(body.email, 150) || null,
+            gender: cleanText(body.gender, 20) || null,
+            occupation: cleanText(body.occupation, 100) || null,
+            description: cleanText(body.description, 500) || null,
+            id_proof_type: idProofType,
+            id_proof_number: idProofNumber,
+            whatsapp_phone: cleanPhone(body.whatsAppPhone) || null,
+            emergency_phone: cleanPhone(body.emergencyPhone) || null,
+            vehicle_registration_number:
+                cleanText(body.vehicleNumber, 30) || null,
+            vehicle_type: cleanText(body.vehicleType, 30) || null,
+            parking_slot: normalizeParkingSlot(body.parkingSlot !== undefined ? body.parkingSlot : body.parking_slot) ?? null,
+        })
+        .select("contact_id")
+        .single();
 
-    if (existingContactRes.data?.contact_id) {
-        contactId = existingContactRes.data.contact_id;
-        const parkingSlot = normalizeParkingSlot(body.parkingSlot !== undefined ? body.parkingSlot : body.parking_slot);
-        if (parkingSlot !== undefined) {
-            const { error: parkingErr } = await admin.from("SSP_Contact")
-                .update({ parking_slot: parkingSlot }).eq("contact_id", contactId);
-            if (parkingErr) return buildError(req, "SERVER_ERROR", "Failed to update contact parking slot.", 500);
-        }
-    } else {
-        const { data: newContact, error: cErr } = await admin
-            .from("SSP_Contact")
-            .insert({
-                name,
-                phone,
-                society: ctx.callerSocietyId,
-                email: cleanText(body.email, 150) || null,
-                gender: cleanText(body.gender, 20) || null,
-                occupation: cleanText(body.occupation, 100) || null,
-                description: cleanText(body.description, 500) || null,
-                id_proof_type: idProofType,
-                id_proof_number: idProofNumber,
-                whatsapp_phone: cleanPhone(body.whatsAppPhone) || null,
-                emergency_phone: cleanPhone(body.emergencyPhone) || null,
-                vehicle_registration_number:
-                    cleanText(body.vehicleNumber, 30) || null,
-                vehicle_type: cleanText(body.vehicleType, 30) || null,
-                parking_slot: normalizeParkingSlot(body.parkingSlot !== undefined ? body.parkingSlot : body.parking_slot) ?? null,
-            })
-            .select("contact_id")
-            .single();
-
-        if (cErr || !newContact) {
-            log("error", "crud-family.CREATE", "Contact insert failed", {
-                err: cErr?.message,
-            });
-            return buildError(
-                req,
-                "SERVER_ERROR",
-                "Failed to create contact.",
-                500,
-            );
-        }
-        contactId = newContact.contact_id;
+    if (cErr || !newContact) {
+        log("error", "crud-family.CREATE", "Contact insert failed", {
+            err: cErr?.message,
+        });
+        return buildError(
+            req,
+            "SERVER_ERROR",
+            "Failed to create contact.",
+            500,
+        );
     }
+    const contactId = newContact.contact_id;
 
     // ---- User insert ----
     const { data: newUser, error: uErr } = await admin
@@ -1894,9 +1892,9 @@ async function handleCreate(
             ...(resolvedFlatType ?? {flatTypeId:null,flatType:null}),
             residentId: newUser.user_id,
             contactId,
-            parkingSlot: (body.parkingSlot !== undefined || body.parking_slot !== undefined)
-                ? normalizeParkingSlot(body.parkingSlot !== undefined ? body.parkingSlot : body.parking_slot)
-                : existingContactRes.data?.parking_slot ?? null,
+            parkingSlot: normalizeParkingSlot(
+                body.parkingSlot !== undefined ? body.parkingSlot : body.parking_slot,
+            ) ?? null,
         },
     });
 }
@@ -2191,6 +2189,24 @@ async function handleUpdate(
     }
     if (body.vehicleType !== undefined) {
         cu.vehicle_type = cleanText(body.vehicleType, 30) || null;
+    }
+
+    if (
+        typeof cu.phone === "string" &&
+        target.contact &&
+        await contactPhoneAlreadyExists(
+            admin,
+            ctx.callerSocietyId,
+            cu.phone,
+            target.contact,
+        )
+    ) {
+        return buildError(
+            req,
+            "DUPLICATE_CONTACT_PHONE",
+            CONTACT_PHONE_DUPLICATE_MESSAGE,
+            400,
+        );
     }
 
     if (!isPrimary && (body.flatTypeId !== undefined || body.flatType !== undefined))
