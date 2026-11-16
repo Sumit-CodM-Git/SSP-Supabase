@@ -54,8 +54,8 @@ serve(async (req)=>{
     let imageUrl = null;
     if (file) {
       const fileExt = file.name.split('.').pop();
-      // Dynamically matches: societyRegistrationNumber/Financial/timestamp_paymentId.ext
-      const filePath = `${cleanRegNum}/Financial/${Date.now()}_${targetPayment.payment_id || targetPayment.pay_rec_id}.${fileExt}`;
+      // Store payment proofs in the canonical lowercase financial folder.
+      const filePath = `${cleanRegNum}/financial/${Date.now()}_${targetPayment.payment_id || targetPayment.pay_rec_id}.${fileExt}`;
       const { error: uploadError } = await supabase.storage.from('society-documents').upload(filePath, file);
       if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
       imageUrl = filePath;

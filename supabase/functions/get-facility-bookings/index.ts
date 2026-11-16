@@ -1,4 +1,4 @@
-import { resolveReceiptImage } from "../_shared/receipt-storage.ts";
+import { resolveFacilityReceiptImage } from "../_shared/facility-receipt.ts";
 /*import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -482,7 +482,7 @@ serve(async (req: Request) => {
 
         const docArray = paymentObj?.SSP_Document
         const documents = Array.isArray(docArray) ? docArray : docArray ? [docArray] : []
-        const receipt = await resolveReceiptImage(supabase, [
+        const receipt = await resolveFacilityReceiptImage(supabase, [
           ...documents.map((doc: any) => doc.s3_path), paymentObj?.receipt_url
         ])
 

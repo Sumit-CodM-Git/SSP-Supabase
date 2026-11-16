@@ -86,6 +86,19 @@ assert.doesNotMatch(
 assert.match(residentSource.slice(residentSubmit, residentFetch), /receiptUploadStatus: uploadPresignedUrl \? "pending_upload"/);
 assert.match(residentSource, /\.eq\("society_user", targetResidentId\)/);
 
+// Execute the submission completion log: a missing variable here used to throw
+// after upload preparation, preventing the signed URL from reaching the client.
+const submissionSource = residentSource.slice(residentSubmit, residentFetch);
+const completionLog = submissionSource.match(/logger\.info\(\{[\s\S]*?action: "resident_payments_console_submit_end",[\s\S]*?\}\);/);
+assert.ok(completionLog, "submission must log completion");
+let completion;
+new Function("logger", "userId", "paymentRecordUuid", "statusVal", "uploadPresignedUrl", "startTime", completionLog[0])(
+  { info: (entry) => { completion = entry; } },
+  "resident-id", "payment-uuid", "UNPAID", "https://project.test/upload", Date.now(),
+);
+assert.equal(completion.status, "UNPAID");
+assert.equal(completion.hasUpload, true);
+
 const legacySource = readFileSync(
   new URL("../functions/make-resident-payment/index.ts", import.meta.url),
   "utf8",

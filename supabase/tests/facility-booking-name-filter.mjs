@@ -59,7 +59,7 @@ class Query {
 }
 let handler;
 const source=stripTypeScriptTypes(readFileSync(new URL('../functions/get-facility-bookings/index.ts',import.meta.url),'utf8').replace(/^import\s[\s\S]*?from\s+["'][^"']+["'];?\s*$/gm,''));
-new Function('serve','createClient','Deno','resolveReceiptImage',source)
+new Function('serve','createClient','Deno','resolveFacilityReceiptImage',source)
  (fn=>handler=fn,()=>({from:table=>new Query(table)}),{env:{get:()=>''}},async()=>({receiptImageUrl:null,receiptUploadStatus:'not_provided'}));
 async function run(payload={}){
  const response=await handler(new Request('https://test',{method:'POST',body:JSON.stringify({societyRegistrationNumber:society,...payload})}));

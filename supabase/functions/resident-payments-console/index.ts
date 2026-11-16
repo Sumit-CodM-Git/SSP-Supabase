@@ -415,7 +415,7 @@ Deno.serve(
           action: "resident_payments_console_submit_end",
           userId,
           paymentRecordId: paymentRecordUuid,
-          status: needsUnderReview ? "UNDER REVIEW" : statusVal,
+          status: statusVal,
           hasUpload: !!uploadPresignedUrl,
           durationMs: Date.now() - startTime,
         });

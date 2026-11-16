@@ -1219,7 +1219,7 @@ Deno.serve(
           const cleanName = safeFileName(fileName);
           const objectKey = `${safeSocietySlug(
             societyRegistrationNumber,
-          )}/Financial/${Date.now()}_${cleanName}`;
+          )}/financial/${Date.now()}_${cleanName}`;
 
           const { data: uploadUrlData, error: storageErr } = await supabaseAdmin
             .storage.from(BUCKET_NAME)
@@ -1238,7 +1238,7 @@ Deno.serve(
                 file_name: fileName,
                 file_type: fileType,
                 file_size: fileSize ? parseFloat(String(fileSize)) : null,
-                document_type: "Financial",
+                document_type: "financial",
                 s3_path: objectKey,
                 society: societyId,
                 payment: payment.pay_rec_id,
