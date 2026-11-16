@@ -1,4 +1,5 @@
 import { visitorTimeISTISO } from "../_shared/visitor-time.ts";
+import { createResidentPlanLookup } from "../_shared/resident-subscription-plan.ts";
 import { hasVisitorName, readVisitorName, findVisitorDraft, isVisitorOtpDraft, canCompleteVisitorDetails, VisitorDraftError } from "../_shared/visitor-drafts.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -181,6 +182,7 @@ interface ProcessedDocument {
 }
 
 interface ResidentByFlat {
+  subscriptionPlan: string | null;
   phoneNumber: string;
   name: string;
   flatNumber: string;
@@ -764,6 +766,8 @@ Deno.serve(
               `
               user_id,
               unit_flat_number,
+              subscription_tower:tower,
+              subscription_block:block,
               block:SSP_Block ( block_name ),
               tower:SSP_Tower ( name ),
               contact:SSP_Contact (parking_slot, name, phone )
@@ -795,8 +799,9 @@ Deno.serve(
             );
           }
 
-          const residents: ResidentByFlat[] = (residentRows ?? []).map(
-            (row: Record<string, unknown>) => {
+          const resolvePlan = createResidentPlanLookup(supabaseAdmin,societyId);
+          const residents: ResidentByFlat[] = await Promise.all((residentRows ?? []).map(
+            async (row: Record<string, unknown>) => {
               const rawContact = Array.isArray(row.contact)
                 ? (row.contact[0] as Record<string, unknown> | undefined)
                 : (row.contact as Record<string, unknown> | undefined);
@@ -808,6 +813,7 @@ Deno.serve(
                 : (row.tower as Record<string, unknown> | undefined);
 
               return {
+                subscriptionPlan: await resolvePlan(row),
                 parkingSlot: contactParkingSlot(rawContact),
                 phoneNumber: String(rawContact?.phone ?? ""),
                 name: String(rawContact?.name ?? ""),
@@ -817,7 +823,7 @@ Deno.serve(
                 societyUserId: String(row.user_id ?? ""),
               };
             }
-          );
+          ));
 
           const totalRecords = residentCount ?? residents.length;
 

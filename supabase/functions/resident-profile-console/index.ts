@@ -1,4 +1,5 @@
 import { resolveResidentFlatType, residentFlatTypeFields, ResidentFlatTypeError } from "../_shared/resident-flat-type.ts";
+import { profileImageUrls } from "../_shared/profile-images.ts";
 import {
   CONTACT_PHONE_DUPLICATE_MESSAGE,
   contactParkingSlot,
@@ -112,6 +113,7 @@ const MAX_EMAIL = 254;
 type ActionType = "FETCH_ONE" | "FETCH_ALL" | "UPDATE";
 
 interface MergedRequest {
+  includeProfileImage?: boolean;
   flatTypeId?: string | null;
   flatType?: string | null;
   actionType?: ActionType;
@@ -331,6 +333,14 @@ function buildProfile(record: ResidentProfileRecord, society: SocietyContext) {
       status: record.status ? "Active" : "Inactive",
     },
   };
+}
+
+async function profilesWithImages(records: any[], societyId: string, include: boolean) {
+  const images = include ? await profileImageUrls(supabaseAdmin,societyId,
+    records.map(r=>({ownerType:"society_user" as const,ownerId:r.user_id}))) : new Map<string,string>();
+  return records.map(row=>({...row,...residentFlatTypeFields(row),
+    ...(include ? {profileImageUrl:images.get(`society_user:${row.user_id}`)??null} : {}),
+  }));
 }
 
 function matchesRole(record: ResidentProfileRecord, wanted: string): boolean {
@@ -766,9 +776,12 @@ Deno.serve(
           );
         }
 
-        const profiles = filteredRecords.map((r) =>
-          buildProfile(r, societyContext as SocietyContext)
-        );
+        const images = body.includeProfileImage === true
+          ? await profileImageUrls(supabaseAdmin,societyContext.society_id,filteredRecords.map(r=>({ownerType:"society_user" as const,ownerId:String(r.user_id??"")}))) : new Map<string,string>();
+        const profiles = filteredRecords.map((r) => ({
+          ...buildProfile(r, societyContext as SocietyContext),
+          ...(body.includeProfileImage === true ? {profileImageUrl:images.get(`society_user:${r.user_id}`)??null} : {}),
+        }));
 
         logger.info({
           level: "info",
@@ -984,7 +997,7 @@ Deno.serve(
 
         return successResponse(
           asPayload({
-            residents: (records ?? []).map(row => ({...row, ...residentFlatTypeFields(row)})),
+            residents: await profilesWithImages(records ?? [],societyContext.society_id,body.includeProfileImage === true),
             pagination: {
               total,
               page: pageNum,
