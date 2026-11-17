@@ -1,6 +1,6 @@
 import { visitorTimeISTISO } from "../_shared/visitor-time.ts";
 import { createResidentPlanLookup } from "../_shared/resident-subscription-plan.ts";
-import { hasVisitorName, readVisitorName, findVisitorDraft, isVisitorOtpDraft, canCompleteVisitorDetails, VisitorDraftError } from "../_shared/visitor-drafts.ts";
+import { canOmitVisitorPhone, hasVisitorName, readVisitorName, findVisitorDraft, isVisitorOtpDraft, canCompleteVisitorDetails, VisitorDraftError } from "../_shared/visitor-drafts.ts";
 import { contactParkingSlot } from "../_shared/contact.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireAuth, AuthContext } from "../_shared/auth.ts";
@@ -464,8 +464,12 @@ Deno.serve(
             return errorResponse("Visitor name does not match this visit.", 409);
           }
           const visitorName = suppliedName ?? savedName;
-          const visitorPhone = phone ?? draft?.phone_number;
-          if (!visitorName || !visitorPhone) return errorResponse("visitorName and phone/phoneNumber (or an OTP visitorId) are required.", 400);
+          const visitorPhone = phone ?? draft?.phone_number ?? null;
+          if (!visitorName) return errorResponse("visitorName is required.", 400);
+          if (!visitorPhone && (normalizedRole !== "visitor" || draft?.pre_approved ||
+              !await canOmitVisitorPhone(supabaseAdmin, hostedByUuid, societyId))) {
+            return errorResponse("phone/phoneNumber is required for this resident or visitor role.", 400);
+          }
           const reusable = draft && (isVisitorOtpDraft(draft) || canCompleteVisitorDetails(draft));
           const keepDecision = draft && ["approved", "rejected"].includes(String(draft.visitor_approval_status ?? "").toLowerCase());
           const submitted = draft && !reusable;
