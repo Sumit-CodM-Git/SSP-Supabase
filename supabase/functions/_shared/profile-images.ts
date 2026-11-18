@@ -117,6 +117,7 @@ async function authorizeWrite(client:any, actor:Awaited<ReturnType<typeof actorC
   const security=actor.kind==="society_user" && actor.roles.includes("security") &&
     (owner.ownerType==="servant" || (owner.ownerType==="non_society_user" && String(data.role).toLowerCase()==="visitor"));
   if(!self && !admin && !security)throw new ProfileImageError("You cannot change this profile image.",403);
+  return data;
 }
 function imageSignature(bytes:Uint8Array,mime:string):boolean {
   if(mime==="image/jpeg")return bytes.length>=3 && bytes[0]===255 && bytes[1]===216 && bytes[2]===255;
@@ -142,19 +143,29 @@ export async function handleProfileImages(req:Request,actorId:string,client:any)
       return reply({success:true,data:{images:owners.map(o=>({...o,profileImageUrl:urls.get(profileOwnerKey(o))??null})),expiresIn:PROFILE_IMAGE_TTL}});
     }
     const owner=profileOwner(body);
-    await authorizeWrite(client,actor,owner);
-    const name=fileName(body.fileName);
+    const ownerRecord=await authorizeWrite(client,actor,owner);
+    fileName(body.fileName);
+    const imageId=typeof ownerRecord.contact==="string" && uuid.test(ownerRecord.contact)
+      ? ownerRecord.contact.toLowerCase() : owner.ownerId;
+    const storedName=(extension:string)=>`${imageId}_profileImage.${extension}`;
     if(body.action==="PREPARE_UPLOAD") {
       if(!Object.prototype.hasOwnProperty.call(extensions,body.fileType))throw new ProfileImageError("fileType must be image/jpeg, image/png, or image/webp.");
       if(body.fileSize!=null && (!Number.isInteger(body.fileSize) || body.fileSize<1 || body.fileSize>PROFILE_IMAGE_MAX_BYTES))throw new ProfileImageError("fileSize must be between 1 and 5242880 bytes.");
-      const objectKey=prefix(actor.society,owner)+crypto.randomUUID()+"."+extensions[body.fileType];
+      const objectKey=prefix(actor.society,owner)+crypto.randomUUID()+"/"+storedName(extensions[body.fileType]);
       const {data,error}=await client.storage.from(PROFILE_BUCKET).createSignedUploadUrl(objectKey);
       if(error || !data?.signedUrl)throw new ProfileImageError("Unable to prepare image upload.",503);
       return reply({success:true,data:{...owner,uploadStatus:"pending_upload",upload:{bucket:PROFILE_BUCKET,objectKey,uploadUrl:data.signedUrl,method:"PUT",headers:{"Content-Type":body.fileType}}}});
     }
     const objectKey=body.objectKey;
     const expected=prefix(actor.society,owner);
-    if(typeof objectKey!=="string" || !objectKey.startsWith(expected) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp)$/.test(objectKey.slice(expected.length)))throw new ProfileImageError("objectKey does not belong to this profile.");
+    const relativeKey=typeof objectKey==="string" && objectKey.startsWith(expected)
+      ? objectKey.slice(expected.length) : "";
+    const parts=relativeKey.split("/");
+    // Accept legacy UUID filenames for uploads prepared before this rollout.
+    const legacy=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp)$/.test(relativeKey);
+    const named=parts.length===2 && uuid.test(parts[0]) &&
+      ["jpg","png","webp"].some(ext=>parts[1]===storedName(ext));
+    if(!legacy && !named)throw new ProfileImageError("objectKey does not belong to this profile.");
     const slash=objectKey.lastIndexOf("/");
     const storage=client.storage.from(PROFILE_BUCKET);
     const {data:files,error:listError}=await storage.list(objectKey.slice(0,slash),{search:objectKey.slice(slash+1),limit:100});
@@ -169,11 +180,22 @@ export async function handleProfileImages(req:Request,actorId:string,client:any)
     if(bytes.length!==size || !imageSignature(bytes,mime))throw new ProfileImageError("Uploaded file does not have a valid image signature.");
     const {data:signed,error:signError}=await storage.createSignedUrl(objectKey,PROFILE_IMAGE_TTL);
     if(signError || !signed?.signedUrl)throw new ProfileImageError("Unable to prepare image display URL.",503);
-    const {data:saved,error:saveError}=await client.from("SSP_Profile_Image").upsert({
+    const name=storedName(extensions[mime]);
+    const {data:saved,error:saveError}=await client.rpc("replace_profile_image",{p_image:{
       owner_type:owner.ownerType,owner_id:owner.ownerId,society:actor.society,object_key:objectKey,
       file_name:name,file_type:mime,file_size:size,uploaded_by:actorId,
-    },{onConflict:"owner_type,owner_id"}).select("updated_at").single();
+    }});
+    if(saveError?.code==="22023")throw new ProfileImageError(saveError.message,409);
     if(saveError || !saved)throw new ProfileImageError("Unable to save profile image.",503);
+    const cleanupKeys=(saved.cleanup_keys??[]).filter((key:unknown):key is string=>
+      typeof key==="string" && key!==objectKey);
+    if(cleanupKeys.length) {
+      const {error:removeError}=await storage.remove(cleanupKeys);
+      if(removeError)throw new ProfileImageError("New image saved, but the previous image could not be deleted. Retry CONFIRM_UPLOAD with the same objectKey.",503);
+      const {error:cleanupError}=await client.from("SSP_Profile_Image_Cleanup").delete()
+        .eq("owner_type",owner.ownerType).eq("owner_id",owner.ownerId).in("object_key",cleanupKeys);
+      if(cleanupError)throw new ProfileImageError("New image saved, but cleanup could not be completed. Retry CONFIRM_UPLOAD with the same objectKey.",503);
+    }
     return reply({success:true,data:{...owner,uploadStatus:"uploaded",profileImageUrl:signed.signedUrl,expiresIn:PROFILE_IMAGE_TTL,
       image:{bucket:PROFILE_BUCKET,objectKey,fileName:name,fileType:mime,fileSize:size,updatedAt:saved.updated_at}}});
   } catch(error) {
